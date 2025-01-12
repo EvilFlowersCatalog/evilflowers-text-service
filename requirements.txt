@@ -1,2 +1,8 @@
 python-dotenv==1.0.1
 pymupdf
+
+# API
+fastapi
+uvicorn
+python-multipart
+httpx

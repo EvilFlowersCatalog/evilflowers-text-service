@@ -44,8 +44,10 @@ class TextExtractor:
             for line in lines:
                 if line.strip():  # If the line is not empty
                     paragraph.append(line)
-                else:
-                    # If we encounter an empty line, consider the paragraph complete
+                elif paragraph:  # Empty line and we have a paragraph
+                    paragraphs.append([page_num, " ".join(paragraph)])
+                    paragraph = []
+                elif "\t" in line:  # Check for tab characters
                     if paragraph:
                         paragraphs.append([page_num, " ".join(paragraph)])
                         paragraph = []
