@@ -6,3 +6,6 @@ fastapi
 uvicorn
 python-multipart
 httpx
+ocrmypdf
+pytesseract
+pdf2image

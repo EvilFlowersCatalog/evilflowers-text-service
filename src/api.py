@@ -1,4 +1,5 @@
 from fastapi import FastAPI, UploadFile, File, HTTPException
+from typing import Tuple, Dict
 import os
 import uuid
 import httpx
@@ -12,7 +13,7 @@ app = FastAPI(
     version="1.0.0"
 )
 
-ELASTICSEARCH_SERVICE_URL = "http://elasticsearch-module:8000"
+ELASTICSEARCH_SERVICE_URL = "http://elasticsearch-module:9200"
 
 async def save_text_in_elasticsearch(file: UploadFile, content: str, extracted_text: str) -> Tuple[str, Dict]:
     # Prepare document for Elasticsearch

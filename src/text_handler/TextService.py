@@ -23,10 +23,10 @@ class TextHandler:
         return tables
     
     def extract_text(self):
-        # pages = self.text_extractor.extract_pages()
-        # paragraphs = self.text_extractor.extract_paragraphs()
-        sentences = self.text_extractor.extract_sentences()
-        return sentences
+        pages = self.text_extractor.extract_pages_text()
+        paragraphs = self.text_extractor.extract_paragraphs()
+        sentences = self.text_extractor.extract_sentences(paragraphs)
+        return pages, paragraphs, sentences
 
     def process_text(self, text: str):
         return self.text_processor.process_text(text)

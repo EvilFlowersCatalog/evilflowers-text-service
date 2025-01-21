@@ -107,6 +107,11 @@ Containerized deployment with:
   - python-dotenv
   - httpx
   - uvicorn
+  - ocrmypdf
+  - pytesseract
+  - pdf2image
+  - unpaper
+  - ghostscript
 
 ## Integration
 
