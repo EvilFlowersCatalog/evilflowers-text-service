@@ -16,7 +16,8 @@ class Config:
         # Assuming the use of a library like os.environ to access environment variables
         # This is a placeholder for actual environment variable loading logic
         self._config = {
-            # 'CAPTIONING_MODEL': os.getenv('CAPTIONING_MODEL'),
+            'TABLE_EXTRACTOR': os.getenv('TABLE_EXTRACTOR'),
+            'TABLE_EXTRACTOR_MODE': os.getenv('TABLE_EXTRACTOR_MODE')
         }
 
     def get_config(self):
