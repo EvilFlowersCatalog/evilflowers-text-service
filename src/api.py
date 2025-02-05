@@ -7,6 +7,8 @@ from text_handler.TextExtractor import TextExtractor
 from text_handler.TextProcessor import TextProcessor
 from text_handler.TextService import TextHandler
 
+from elvira_elasticsearch_client import ElasticsearchClient # type: ignore
+
 app = FastAPI(
     title="EvilFlowers Text Service",
     description="Service for extracting and processing text from documents",
@@ -38,6 +40,12 @@ async def save_text_in_elasticsearch(file: UploadFile, content: str, extracted_t
         es_response.raise_for_status()
         es_result = es_response.json()
         return document_id, es_result
+
+@app.get("/")
+async def root():
+    test = ElasticsearchClient.initialize()
+    return test
+
 
 
 @app.post("/process_text")
