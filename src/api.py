@@ -41,12 +41,20 @@ async def save_text_in_elasticsearch(file: UploadFile, content: str, extracted_t
         es_result = es_response.json()
         return document_id, es_result
 
-@app.get("/")
+@app.get("/health_check")
 async def root():
-    test = ElasticsearchClient.initialize()
-    return test
-
-
+    client = ElasticsearchClient()
+    try:
+        health_status = await client.check_connection()
+        return {
+            "status": "ok" if health_status else "error",
+            "elasticsearch_health": health_status
+        }
+    except Exception as e:
+        return {
+            "status": "error",
+            "message": str(e)
+        }
 
 @app.post("/process_text")
 async def process_text(file: UploadFile = File(...)):
