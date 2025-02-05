@@ -9,6 +9,9 @@ httpx
 ocrmypdf
 pytesseract
 pdf2image
+pandas
+pdfplumber
+camelot
 
 # Elasticsearch
 elasticsearch
