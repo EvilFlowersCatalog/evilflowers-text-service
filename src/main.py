@@ -2,9 +2,13 @@ from text_handler.TextService import TextHandler
 
 
 def main():
-    document_path = "../test_data/doc.pdf"
+    document_path = "test_data/doc.pdf"
     text_handler = TextHandler(document_path)
-    return text_handler.extract_text(), text_handler.extract_tables()
+
+    # This will come from analyzer service
+    found_toc = False
+
+    return text_handler.extract_text(found_toc), text_handler.extract_tables()
 
 if __name__ == "__main__":
     text, tables = main()
