@@ -28,7 +28,8 @@ class TextHandler:
         pages = self.text_extractor.extract_pages_text()
         paragraphs = self.text_extractor.extract_paragraphs()
         sentences = self.text_extractor.extract_sentences(paragraphs)
-        return pages, paragraphs, sentences
+        toc = self.text_extractor.extract_toc()
+        return pages, paragraphs, sentences, toc
 
     def process_text(self, text: str):
         return self.text_processor.process_text(text)

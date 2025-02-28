@@ -88,9 +88,32 @@ class TextExtractor:
             sentences.append(page_sentences)
 
         return sentences
+    
+    def extract_toc(self, pages, found_toc: bool):
+        if found_toc:
+            return self._extract_toc(pages)
+        # TODO: This will find the TOC but when it will not be in metadata it will be complicated to extract
+        # if self._check_toc(pages):
+        #     return self._extract_toc(pages)
+        else:
+            return None
 
     ##
     # Private functions
+    def _check_toc(self, pages):
+        toc_keywords = ["Table of Contents", "Chapter", "Section", "Contents"]
+        for page in pages:
+            text = page[1]
+            if text:
+                for keyword in toc_keywords:
+                    if keyword in text:
+                        return True
+        return False
+    
+    def _extract_toc(self, pages):
+        # TODO: Implement TOC extraction
+        pass
+
     def _process_pdf_with_ocr(self, pdf_path):
         """Process PDF with OCR and return the bytes directly"""
         output_buffer = BytesIO()
