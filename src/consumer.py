@@ -1,4 +1,4 @@
-from consumer import DefaultConsumer
+from kafka.consumer import DefaultConsumer
 from config.consumer_config import consumer_conf, consumer_subscriptions
 from text_handler.TextService import TextHandler
 import json
@@ -10,7 +10,7 @@ class MyConsumer(DefaultConsumer):
         json_object = json.loads(json_string)
         
         text_handler = TextHandler(json_object["document_path"])
-        text = text_handler.extract_text()
+        text = text_handler.extract_text(json_object["found_toc"])
         
         print(text)
 

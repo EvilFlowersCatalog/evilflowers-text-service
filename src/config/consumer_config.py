@@ -7,4 +7,4 @@ consumer_conf = {
     'group.id': 'your_consumer_group',
     'auto.offset.reset': 'smallest',
 }
-consumer_subscriptions = ["file-details"]
+consumer_subscriptions = ["text-service-topic"]
