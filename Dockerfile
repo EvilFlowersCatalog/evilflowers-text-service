@@ -23,4 +23,4 @@ RUN mkdir temp
 EXPOSE 8000
 
 # Run the FastAPI application
-CMD ["python", "src/api.py"] 
+CMD ["python", "src/consumer.py"] 

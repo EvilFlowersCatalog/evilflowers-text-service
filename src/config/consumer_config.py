@@ -1,10 +1,15 @@
+import os
+from dotenv import load_dotenv
+
+load_dotenv()
+
 consumer_conf = {
-    'bootstrap.servers': '172.28.1.7:9092',
-    'security.protocol': 'SASL_PLAINTEXT',
-    'sasl.mechanism': 'PLAIN',
-    'sasl.username': 'client',
-    'sasl.password': 'misNn2a997J76gLK3FCd',
-    'group.id': 'your_consumer_group',
-    'auto.offset.reset': 'smallest',
+    'bootstrap.servers': os.getenv('KAFKA_BOOTSTRAP_SERVERS'),
+    'security.protocol': os.getenv('KAFKA_SECURITY_PROTOCOL'),
+    'sasl.mechanism': os.getenv('KAFKA_SASL_MECHANISM'),
+    'sasl.username': os.getenv('KAFKA_SASL_USERNAME'),
+    'sasl.password': os.getenv('KAFKA_SASL_PASSWORD'),
+    'group.id': os.getenv('KAFKA_CONSUMER_GROUP'),
+    'auto.offset.reset': os.getenv('KAFKA_AUTO_OFFSET_RESET'),
 }
 consumer_subscriptions = ["text-service-topic"]
