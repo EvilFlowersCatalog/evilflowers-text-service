@@ -11,7 +11,7 @@ pytesseract
 pdf2image
 pandas
 pdfplumber
-camelot
+# camelot
 
 # Elasticsearch
 elasticsearch

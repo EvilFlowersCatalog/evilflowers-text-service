@@ -19,6 +19,7 @@ class TextExtractor:
         self._validate(document_path)
         self._document_path = document_path
 
+    # EDITOR -> Wtf is this for
     def set_document_path(self, document_path: str):
         self._document_path = document_path
 
@@ -44,35 +45,34 @@ class TextExtractor:
 
     def extract_paragraphs(self):
         """Process PDF and extract paragraphs page by page"""
-        try:
-            # Process PDF with OCR and get bytes directly
-            ocr_pdf_bytes = self._process_pdf_with_ocr(self._document_path)
+        # try:
+        # Process PDF with OCR and get bytes directly
+        ocr_pdf_bytes = self._process_pdf_with_ocr(self._document_path)
+        
+        # Convert PDF bytes to images directly
+        images = convert_from_bytes(ocr_pdf_bytes)
+        # Dictionary to store paragraphs by page
+        all_pages_paragraphs = []
+        
+        # Process each page
+        for page_num, img in enumerate(images, 1):
+            # Extract text from the current page
+            page_text = pytesseract.image_to_string(img)
             
-            # Convert PDF bytes to images directly
-            images = convert_from_bytes(ocr_pdf_bytes)
-            # Dictionary to store paragraphs by page
-            all_pages_paragraphs = []
+            # Split into paragraphs
+            paragraphs = self._split_into_paragraphs(page_text)
             
-            # Process each page
-            for page_num, img in enumerate(images, 1):
-                # Extract text from the current page
-                page_text = pytesseract.image_to_string(img)
-                
-                # Split into paragraphs
-                paragraphs = self._split_into_paragraphs(page_text)
-                
-                # Store paragraphs with page number
-                all_pages_paragraphs.append(paragraphs)
+            # Store paragraphs with page number
+            all_pages_paragraphs.append(paragraphs)
 
-            return all_pages_paragraphs
+        return all_pages_paragraphs
             
-        except Exception as e:
-            print(f"An error occurred: {str(e)}")
-            return None
+        # except Exception as e:
+        #     print(f"An error occurred: {str(e)}")
+        #     return None
 
     
     def extract_sentences(self, all_paragraphs):
-        print("all paragraphs: ", all_paragraphs)
         paragraphs = all_paragraphs
         sentences = []
         for page_num, page in enumerate(paragraphs):
