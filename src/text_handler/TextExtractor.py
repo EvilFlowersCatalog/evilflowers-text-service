@@ -1,12 +1,10 @@
 import os
 import fitz
-
 import ocrmypdf
 import tempfile
 import os
 import pytesseract
 from pdf2image import convert_from_path, convert_from_bytes
-
 from config.Config import Config
 from io import BytesIO
 
@@ -23,6 +21,52 @@ class TextExtractor:
     def set_document_path(self, document_path: str):
         self._document_path = document_path
 
+    ##
+    # Fitz/Digital text based functions
+
+    def extract(self) -> tuple:
+        """
+        Extract everything in one pass through the PDF
+        Returns: (pages, paragraphs, metadata)
+        """
+        doc = self._load_document()
+        toc = doc.get_toc()
+
+        pages = []
+        paragraphs = []
+        
+        for page_num, page in enumerate(doc, start=1):
+            # Get blocks (includes position + text)
+            blocks = page.get_text("blocks")
+            
+            # Extract page-level text (concatenated blocks)
+            page_text = " ".join(block[4].strip() for block in blocks)
+            pages.append([page_num, page_text])
+            
+            # Extract paragraph-level text (individual blocks)
+            page_paragraphs = [
+                block[4].strip() 
+                for block in blocks 
+                if len(block[4].strip()) > 20  # Filter noise
+            ]
+            paragraphs.append(page_paragraphs)
+        
+        doc.close()
+    
+        return pages, paragraphs, None, toc
+
+    def extract_toc(self, pages, found_toc: bool):
+        if found_toc:
+            return self._extract_toc(pages)
+        # TODO: This will find the TOC but when it will not be in metadata it will be complicated to extract
+        # if self._check_toc(pages):
+        #     return self._extract_toc(pages)
+        else:
+            return None
+        
+    ##
+    # OCR based functions
+
     def extract_pages(self):
         doc = self._load_document()
 
@@ -32,18 +76,18 @@ class TextExtractor:
             pages.append([page_num, page])
 
         return pages
-    
-    def extract_pages_text(self):
+
+    def extract_only_text(self):
         pages = self.extract_pages()
-        pages_text = []
+        full_text = []
         for page in pages:
             page_num = page[0]
             page_obj = page[1]  # Get the actual page object
             page_text = page_obj.get_text("text")  # Extract text from page object
-            pages_text.append([page_num, page_text])
-        return pages_text
+            full_text.append([page_num, page_text])
+        return full_text
 
-    def extract_paragraphs(self):
+    def ocr_extract_paragraphs(self):
         """Process PDF and extract paragraphs page by page"""
         # try:
         # Process PDF with OCR and get bytes directly
@@ -70,9 +114,8 @@ class TextExtractor:
         # except Exception as e:
         #     print(f"An error occurred: {str(e)}")
         #     return None
-
-    
-    def extract_sentences(self, all_paragraphs):
+ 
+    def ocr_extract_sentences(self, all_paragraphs):
         paragraphs = all_paragraphs
         sentences = []
         for page_num, page in enumerate(paragraphs):
@@ -88,15 +131,6 @@ class TextExtractor:
             sentences.append(page_sentences)
 
         return sentences
-    
-    def extract_toc(self, pages, found_toc: bool):
-        if found_toc:
-            return self._extract_toc(pages)
-        # TODO: This will find the TOC but when it will not be in metadata it will be complicated to extract
-        # if self._check_toc(pages):
-        #     return self._extract_toc(pages)
-        else:
-            return None
 
     ##
     # Private functions

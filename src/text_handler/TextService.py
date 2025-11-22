@@ -25,10 +25,15 @@ class TextHandler:
         return tables
     
     def extract_text(self, found_toc: bool):
-        pages = self.text_extractor.extract_pages_text()
-        paragraphs = self.text_extractor.extract_paragraphs()
-        sentences = self.text_extractor.extract_sentences(paragraphs)
-        toc = self.text_extractor.extract_toc(pages, found_toc)
+        digital = True
+        if digital:
+            pages, paragraphs, sentences, toc = self.text_extractor.extract()
+        else:
+            pages = self.text_extractor.extract_only_text()
+            paragraphs = self.text_extractor.ocr_extract_paragraphs()
+            sentences = self.text_extractor.ocr_extract_sentences(paragraphs)
+            toc = self.text_extractor.extract_toc(pages, found_toc)
+
         return pages, paragraphs, sentences, toc
 
     def process_text(self, text: str):

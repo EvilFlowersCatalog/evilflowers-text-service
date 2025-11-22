@@ -15,8 +15,8 @@ if __name__ == "__main__":
    
     # print("whole text object: ", text)
     
-    # print("all pages: ", text[0])
-    print("example page: \n\n", text[2][9])
+    print("all pages: ", text[0])
+    # print("toc: ", text[3])
     
     # print("all paragraphs: ", text[1])
     # print("example all paragraph for specific page: \n\n", text[1][10])
@@ -26,5 +26,5 @@ if __name__ == "__main__":
     # print("all paragraph sentences: ", text[2][0])
     # print("example sentence: ", text[2][0][1])
 
-    print(tables)
+    # print(tables)
 
