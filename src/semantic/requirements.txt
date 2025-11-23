@@ -1,0 +1,29 @@
+python-dotenv==1.0.1
+pymupdf
+
+# API
+fastapi
+uvicorn
+python-multipart
+httpx
+ocrmypdf
+pytesseract
+pdf2image
+pandas
+pdfplumber
+# camelot
+nltk
+llama-index-core
+langdetect
+
+# Elasticsearch
+elasticsearch
+kibana
+git+https://github.com/0Kozlik0/EvilFlowerElasticsearch.git@main#egg=elvira_elasticsearch_client
+confluent_kafka
+
+# Semantic Search - NEW
+sentence-transformers==2.2.2
+torch>=2.0.0
+pymilvus>=2.3.0
+numpy>=1.21.0
