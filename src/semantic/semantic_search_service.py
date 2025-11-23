@@ -36,7 +36,7 @@ class SemanticSearchService:
         collection_name: Optional[str] = None
     ):
         """
-        Initialize semantic search service.
+        Initialize semantic search service 
         
         Args:
             milvus_host: Milvus server host
