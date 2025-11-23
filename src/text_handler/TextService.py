@@ -25,14 +25,7 @@ class TextHandler:
         return tables
     
     def extract_text(self, found_toc: bool):
-        digital = True
-        if digital:
-            pages, paragraphs, sentences, toc = self.text_extractor.extract()
-        else:
-            pages = self.text_extractor.extract_only_text()
-            paragraphs = self.text_extractor.ocr_extract_paragraphs()
-            sentences = self.text_extractor.ocr_extract_sentences(paragraphs)
-            toc = self.text_extractor.extract_toc(pages, found_toc)
+        pages, paragraphs, sentences, toc = self.text_extractor.extract()
 
         return pages, paragraphs, sentences, toc
 

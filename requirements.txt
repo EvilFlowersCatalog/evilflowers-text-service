@@ -12,6 +12,9 @@ pdf2image
 pandas
 pdfplumber
 # camelot
+nltk
+llama-index-core
+langdetect
 
 # Elasticsearch
 elasticsearch

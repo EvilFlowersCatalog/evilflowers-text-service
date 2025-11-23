@@ -15,7 +15,11 @@ if __name__ == "__main__":
    
     # print("whole text object: ", text)
     
-    print("all pages: ", text[0])
+    # print("example page: ", text[0][9])
+    print('-' * 100)
+    # print("example page: ", text[2][9])
+    print('-' * 100)
+    print("example page: ", text[1][9])
     # print("toc: ", text[3])
     
     # print("all paragraphs: ", text[1])
