@@ -1,0 +1,24 @@
+# 1. Add to requirements.txt
+sentence-transformers==2.2.2
+torch>=2.0.0
+pymilvus>=2.3.0
+
+# 2. Install dependencies
+pip install -r requirements.txt
+
+# 3. Update .env
+MILVUS_HOST=localhost
+MILVUS_PORT=19530
+SEMANTIC_SEARCH_ENABLED=true
+EMBEDDING_DEVICE=cpu
+EMBEDDING_BATCH_SIZE=32
+CHUNK_LEVEL=paragraph
+
+# 4. Start Milvus
+docker-compose -f docker-compose-semantic.yml up -d milvus
+
+# 5. Test
+python examples/search_example.py
+
+# 6. Run consumer
+python src/consumer.py
