@@ -3,7 +3,7 @@ import pandas as pd
 
 from domain.base.ExtractorInterface import ExtractorInterface
 from domain.extractors.PdfPlumberExtractor import PdfPlumberExtractor
-from domain.extractors.CamelotExtractor import CamelotExtractor
+# from domain.extractors.CamelotExtractor import CamelotExtractor
 from config.Config import Config
 
 class TableExtractor:
@@ -37,8 +37,8 @@ class TableExtractor:
     def _load_extractor(self):
         if self.config.get_config()['TABLE_EXTRACTOR'] == 'PdfPlumber':
             extractor = PdfPlumberExtractor(self._document_path)
-        elif self.config.get_config()['TABLE_EXTRACTOR'] == 'Camelot':
-            extractor = CamelotExtractor(self._document_path, mode=self.config.get_config().get('TABLE_EXTRACTOR_MODE', None))
+        # elif self.config.get_config()['TABLE_EXTRACTOR'] == 'Camelot':
+        #     extractor = CamelotExtractor(self._document_path, mode=self.config.get_config().get('TABLE_EXTRACTOR_MODE', None))
         else:
             raise ValueError(f"Extractor type {self.config.get_config()['EXTRACTOR_MODEL']} not supported")
         return extractor

@@ -11,7 +11,10 @@ pytesseract
 pdf2image
 pandas
 pdfplumber
-camelot
+# camelot
+nltk
+llama-index-core
+langdetect
 
 # Elasticsearch
 elasticsearch

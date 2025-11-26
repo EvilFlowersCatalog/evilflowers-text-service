@@ -2,5 +2,5 @@
 .DS_Store
 __pycache__
 
-test_data/
+src/test_data/
 .env
