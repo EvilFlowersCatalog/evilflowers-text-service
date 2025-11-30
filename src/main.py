@@ -11,7 +11,9 @@ def main():
     return text_handler.extract_text(found_toc), text_handler.extract_tables()
 
 if __name__ == "__main__":
-    text, tables = main()
+    text_results, tables = main()
+
+    pages_dict, toc = text_results
    
     # print("whole text object: ", text)
     
@@ -19,7 +21,7 @@ if __name__ == "__main__":
     print('-' * 100)
     # print("example page: ", text[2][9])
     print('-' * 100)
-    print("example page: ", text[1][9])
+    print("example page: ", pages_dict[9]['text'])
     # print("toc: ", text[3])
     
     # print("all paragraphs: ", text[1])

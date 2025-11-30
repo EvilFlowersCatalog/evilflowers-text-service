@@ -46,16 +46,16 @@ class TextExtractor:
         doc = self._load_document()
 
         if self._is_digital(doc):
-            pages, paragraphs, sentences, toc = self._extract_digital(doc)
+            pages, toc = self._extract_digital(doc)
         else:
-            pages, paragraphs, sentences, toc = self._extract_ocr()
+            pages, toc = self._extract_ocr()
         doc.close()
     
-        return pages, paragraphs, sentences, toc
+        return pages,  toc
 
     ##
     # Private functions
-    # EDITOR -> Add python esque looping like in the extract function
+    # EDITOR -> Add python esque looping like in the extract digital function
     def _is_digital(self, doc) -> bool:
         """Check if PDF has extractable text or needs OCR"""
         # Sample first few pages
@@ -102,8 +102,8 @@ class TextExtractor:
         toc = doc.get_toc()
 
         pages = []
-        paragraphs = []
-        sentences = []
+        # paragraphs = []
+        # sentences = []
         
         for page_num, page in enumerate(doc, start=1):
             # Get blocks (includes position + text)
@@ -116,17 +116,24 @@ class TextExtractor:
             ]
 
             page_text = " ".join(cleaned_blocks)
-            pages.append([page_num, page_text])
+            # pages.append([page_num, page_text])
             
             # Extract paragraph-level text (individual blocks)
             page_paragraphs = [t for t in cleaned_blocks if len(t) > 20]
-            paragraphs.append(page_paragraphs)
+            # paragraphs.append(page_paragraphs)
 
             # Extract page-level sentences using NLP
             page_sentences = sent_tokenize(page_text)
-            sentences.append(page_sentences)
+            # sentences.append(page_sentences)
 
-        return pages, paragraphs, sentences, toc
+            pages.append({
+                'page_num': page_num,
+                'text': page_text,
+                'paragraphs': page_paragraphs,
+                'sentences': page_sentences
+            })
+
+        return pages, toc
 
     def extract_toc(self, pages, found_toc: bool):
         if found_toc:
@@ -140,8 +147,8 @@ class TextExtractor:
     ## OCR based functions
     def _extract_ocr(self) -> tuple:
         pages = []
-        paragraphs = []
-        sentences = []
+        # paragraphs = []
+        # sentences = []
 
         # try:
         # Process PDF with OCR and get bytes directly
@@ -153,11 +160,11 @@ class TextExtractor:
         for page_num, img in enumerate(images, 1):
             # Extract text from the current page
             page_text = pytesseract.image_to_string(img)
-            pages.append([page_num, page_text])
+            # pages.append([page_num, page_text])
 
             # Split into paragraphs
             page_paragraphs = self._split_into_paragraphs(page_text)            
-            paragraphs.append(page_paragraphs)
+            # paragraphs.append(page_paragraphs)
 
             page_sentences = []
             for paragraph_num, paragraph in enumerate(page_paragraphs):
@@ -168,10 +175,17 @@ class TextExtractor:
                     if sentence.strip():  # Only add non-empty sentences
                         paragraph_sentence.append(sentence.strip())
                 page_sentences.append(paragraph_sentence)
-            sentences.append(page_sentences)
+            # sentences.append(page_sentences)
+
+            pages.append({
+                'page_num': page_num,
+                'text': page_text,
+                'paragraphs': page_paragraphs,
+                'sentences': page_sentences
+            })
 
         # except Exception as e:
-        return pages, paragraphs, sentences, None
+        return pages, None
 
     def _process_pdf_with_ocr(self, pdf_path):
         """Process PDF with OCR and return the bytes directly"""
