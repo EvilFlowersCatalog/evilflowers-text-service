@@ -26,7 +26,7 @@ class SemanticConfig:
     
     # Chunking Configuration
     CHUNK_LEVEL = os.getenv('CHUNK_LEVEL', 'paragraph')  # 'paragraph' or 'page'
-    MIN_PARAGRAPH_LENGTH = 30  # Minimum words to index
+    MIN_PARAGRAPH_LENGTH = 10  # Minimum words to index
     
     # Feature Flags
     SEMANTIC_SEARCH_ENABLED = os.getenv('SEMANTIC_SEARCH_ENABLED', 'true').lower() == 'true'

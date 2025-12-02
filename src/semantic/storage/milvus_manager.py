@@ -1,6 +1,7 @@
 """
 Milvus vector database manager
 """
+import os
 from pymilvus import (
     connections,
     Collection,
@@ -40,22 +41,46 @@ class MilvusManager:
             self._setup_collection()
     
     def _connect(self):
-        """Connect to Milvus server"""
-        try:
-            logger.info(f"Connecting to Milvus at {SemanticConfig.MILVUS_HOST}:{SemanticConfig.MILVUS_PORT}")
-            
-            connections.connect(
-                alias="default",
-                host=SemanticConfig.MILVUS_HOST,
-                port=SemanticConfig.MILVUS_PORT
-            )
-            
-            self._connected = True
-            logger.info("✓ Connected to Milvus")
-            
-        except Exception as e:
-            logger.error(f"Failed to connect to Milvus: {e}")
-            raise
+        """Connect to Milvus server or use embedded Milvus Lite"""
+        
+        # Check if we should use Milvus Lite (embedded)
+        use_lite = os.getenv('USE_MILVUS_LITE', 'false').lower() == 'true'
+        
+        if use_lite:
+            # Use embedded Milvus Lite (no server needed!)
+            logger.info("Using Milvus Lite (embedded mode)")
+            try:
+                db_file = os.getenv('MILVUS_LITE_DB', './milvus_lite.db')
+                
+                # For Milvus Lite, use URI connection
+                connections.connect(
+                    alias="default",
+                    uri=db_file  # This triggers Milvus Lite mode
+                )
+                
+                self._connected = True
+                logger.info(f"✓ Connected to Milvus Lite: {db_file}")
+                
+            except Exception as e:
+                logger.error(f"Failed to connect to Milvus Lite: {e}")
+                raise
+        else:
+            # Use regular Milvus server
+            try:
+                logger.info(f"Connecting to Milvus server at {SemanticConfig.MILVUS_HOST}:{SemanticConfig.MILVUS_PORT}")
+                
+                connections.connect(
+                    alias="default",
+                    host=SemanticConfig.MILVUS_HOST,
+                    port=SemanticConfig.MILVUS_PORT
+                )
+                
+                self._connected = True
+                logger.info("✓ Connected to Milvus server")
+                
+            except Exception as e:
+                logger.error(f"Failed to connect to Milvus: {e}")
+                raise
     
     def _setup_collection(self):
         """Create or load collection"""
@@ -96,17 +121,31 @@ class MilvusManager:
         logger.info(f"✓ Collection {collection_name} is ready")
     
     def _create_index(self):
-        """Create HNSW index for fast similarity search"""
-        index_params = {
-            "metric_type": "COSINE",
-            "index_type": "HNSW",
-            "params": {
-                "M": 16,
-                "efConstruction": 256
-            }
-        }
+        """Create index for fast similarity search"""
         
-        logger.info("Creating HNSW index...")
+        # Check if using Milvus Lite
+        use_lite = os.getenv('USE_MILVUS_LITE', 'false').lower() == 'true'
+        
+        if use_lite:
+            # Milvus Lite: Use AUTOINDEX (simpler, automatically optimized)
+            index_params = {
+                "metric_type": "COSINE",
+                "index_type": "AUTOINDEX",
+                "params": {}
+            }
+            logger.info("Creating AUTOINDEX for Milvus Lite...")
+        else:
+            # Milvus Server: Use HNSW (faster for large datasets)
+            index_params = {
+                "metric_type": "COSINE",
+                "index_type": "HNSW",
+                "params": {
+                    "M": 16,
+                    "efConstruction": 256
+                }
+            }
+            logger.info("Creating HNSW index for Milvus Server...")
+        
         self._collection.create_index(
             field_name="embedding",
             index_params=index_params
