@@ -25,9 +25,9 @@ class TextHandler:
         return tables
     
     def extract_text(self, found_toc: bool):
-        pages, paragraphs, sentences, toc = self.text_extractor.extract()
+        pages, toc = self.text_extractor.extract()
 
-        return pages, paragraphs, sentences, toc
+        return pages, toc
 
     def process_text(self, text: str):
         return self.text_processor.process_text(text)
