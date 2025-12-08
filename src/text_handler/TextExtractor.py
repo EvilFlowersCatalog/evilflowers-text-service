@@ -11,7 +11,10 @@ from io import BytesIO
 # EDITOR -> we need to consider how this would work on the server + what model to use, test them
 import nltk
 from nltk.tokenize import sent_tokenize
-nltk.download('punkt_tab')
+try:
+    nltk.data.find('tokenizers/punkt_tab/slovak.pickle')
+except LookupError:
+    nltk.download('punkt_tab')
 
 class TextExtractor:
     config = Config()
@@ -27,7 +30,7 @@ class TextExtractor:
 
     ##
     # Fitz/Digital text based functions
-    def extract(self) -> tuple:
+    def extract(self) -> tuple[list[dict[str, any]], list | None]:
         """
         Extract everything in one pass through the PDF
         Returns: (pages, paragraphs, metadata)
@@ -56,7 +59,7 @@ class TextExtractor:
     ##
     # Private functions
     # EDITOR -> Add python esque looping like in the extract digital function
-    def _is_digital(self, doc) -> bool:
+    def _is_digital(self, doc: fitz.Document) -> bool:
         """Check if PDF has extractable text or needs OCR"""
         # Sample first few pages
         for page_num in range(min(30, doc.page_count)):
@@ -66,7 +69,7 @@ class TextExtractor:
                 return True
         return False
 
-    def _check_toc(self, pages):
+    def _check_toc(self, pages: list[dict[str, any]]) -> bool:  
         toc_keywords = ["Table of Contents", "Chapter", "Section", "Contents"]
         for page in pages:
             text = page[1]
@@ -76,11 +79,11 @@ class TextExtractor:
                         return True
         return False
     
-    def _extract_toc(self, pages):
+    def _extract_toc(self, pages: list[dict[str, any]]) -> any:
         # TODO: Implement TOC extraction
         pass
 
-    def _load_document(self):
+    def _load_document(self) -> fitz.Document:
         doc = fitz.open(self._document_path)
         return doc
     
@@ -98,7 +101,7 @@ class TextExtractor:
         
         return text.strip()
     
-    def _extract_digital(self, doc) -> tuple:
+    def _extract_digital(self, doc: fitz.Document) -> tuple[list[dict[str, any]], list]:
         toc = doc.get_toc()
 
         pages = []
@@ -135,7 +138,7 @@ class TextExtractor:
 
         return pages, toc
 
-    def extract_toc(self, pages, found_toc: bool):
+    def extract_toc(self, pages: list[dict[str, any]], found_toc: bool) -> any:
         if found_toc:
             return self._extract_toc(pages)
         # TODO: This will find the TOC but when it will not be in metadata it will be complicated to extract
@@ -145,7 +148,7 @@ class TextExtractor:
             return None
         
     ## OCR based functions
-    def _extract_ocr(self) -> tuple:
+    def _extract_ocr(self) -> tuple[list[dict[str, any]], None]:
         pages = []
         # paragraphs = []
         # sentences = []
@@ -187,7 +190,7 @@ class TextExtractor:
         # except Exception as e:
         return pages, None
 
-    def _process_pdf_with_ocr(self, pdf_path):
+    def _process_pdf_with_ocr(self, pdf_path: str) -> bytes:
         """Process PDF with OCR and return the bytes directly"""
         output_buffer = BytesIO()
         
@@ -199,7 +202,7 @@ class TextExtractor:
         
         return output_buffer.getvalue()
     
-    def _split_into_paragraphs(self, text):
+    def _split_into_paragraphs(self, text: str) -> list[str]:
         """ Split text into paragraphs with improved handling """
         raw_paragraphs = text.split('\n\n')
         
