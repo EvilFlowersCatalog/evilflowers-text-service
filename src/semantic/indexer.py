@@ -28,24 +28,28 @@ class SemanticIndexer:
     def index_document(
         self,
         document_id: str,
-        pages: List[Tuple[int, str]],
-        paragraphs: List[List[str]]
+        pages: List[Dict]
     ) -> Dict:
         """
         Index a document from TextHandler output.
-        
+
         Args:
             document_id: Unique document identifier
-            pages: List of (page_num, page_text) from TextHandler
-            paragraphs: List of paragraph lists from TextHandler
-            
+            pages: List of page dicts from TextHandler with structure:
+                {
+                    'page_num': int,
+                    'text': str,
+                    'paragraphs': List[str],
+                    'sentences': List[str]
+                }
+
         Returns:
             Dict with indexing results
         """
         logger.info(f"Indexing document: {document_id}")
-        
+
         # Prepare chunks and metadata
-        chunks, metadata = self._prepare_chunks(pages, paragraphs)
+        chunks, metadata = self._prepare_chunks(pages)
         
         if not chunks:
             logger.warning(f"No valid chunks found for document {document_id}")
@@ -105,23 +109,26 @@ class SemanticIndexer:
     
     def _prepare_chunks(
         self,
-        pages: List[Tuple[int, str]],
-        paragraphs: List[List[str]]
+        pages: List[Dict]
     ) -> Tuple[List[str], List[Dict]]:
         """
         Prepare chunks and metadata from TextHandler output.
-        
+
+        Args:
+            pages: List of page dicts with 'page_num', 'text', 'paragraphs', 'sentences'
+
         Returns:
             (chunks, metadata) tuple
         """
         chunks = []
         metadata = []
-        
+
         if SemanticConfig.CHUNK_LEVEL == "paragraph":
             # Paragraph-level chunking
-            for page_idx, page_paragraphs in enumerate(paragraphs):
-                page_num = page_idx + 1
-                
+            for page_dict in pages:
+                page_num = page_dict['page_num']
+                page_paragraphs = page_dict['paragraphs']
+
                 for para_idx, para_text in enumerate(page_paragraphs):
                     # Filter valid paragraphs
                     if self._is_valid_paragraph(para_text):
@@ -133,10 +140,13 @@ class SemanticIndexer:
                             "text": para_text,
                             "text_length": len(para_text)
                         })
-        
+
         elif SemanticConfig.CHUNK_LEVEL == "page":
             # Page-level chunking
-            for page_num, page_text in pages:
+            for page_dict in pages:
+                page_num = page_dict['page_num']
+                page_text = page_dict['text']
+
                 if page_text and page_text.strip():
                     chunks.append(page_text)
                     metadata.append({
@@ -146,7 +156,7 @@ class SemanticIndexer:
                         "text": page_text[:2000],  # Preview only
                         "text_length": len(page_text)
                     })
-        
+
         logger.debug(f"Prepared {len(chunks)} chunks at {SemanticConfig.CHUNK_LEVEL} level")
         return chunks, metadata
     

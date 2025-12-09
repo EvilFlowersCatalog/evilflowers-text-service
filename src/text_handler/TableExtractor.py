@@ -40,6 +40,6 @@ class TableExtractor:
         # elif self.config.get_config()['TABLE_EXTRACTOR'] == 'Camelot':
         #     extractor = CamelotExtractor(self._document_path, mode=self.config.get_config().get('TABLE_EXTRACTOR_MODE', None))
         else:
-            raise ValueError(f"Extractor type {self.config.get_config()['EXTRACTOR_MODEL']} not supported")
+            raise ValueError(f"Extractor type {self.config.get_config()['TABLE_EXTRACTOR']} not supported")
         return extractor
 
