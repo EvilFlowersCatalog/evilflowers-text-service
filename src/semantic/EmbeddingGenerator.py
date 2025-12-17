@@ -97,3 +97,4 @@ class EmbeddingGenerator:
             "device": SemanticConfig.DEVICE,
             "batch_size": SemanticConfig.BATCH_SIZE
         }
+        
