@@ -18,8 +18,6 @@ class MyConsumer(DefaultConsumer):
         print(text)
         client.save_extracted_text_to_elasticsearch(document_id=json_object["document_id"],
                                                     text_data=text)
-        
-        
 
 if __name__ == "__main__":
     consumer = MyConsumer(consumer_conf, consumer_subscriptions)

@@ -4,3 +4,5 @@ __pycache__
 
 src/test_data/
 .env
+
+test_local_garbage

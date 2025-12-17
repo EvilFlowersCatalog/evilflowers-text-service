@@ -2,7 +2,7 @@ from text_handler.TextExtractor import TextExtractor
 from text_handler.TextProcessor import TextProcessor
 from text_handler.TableExtractor import TableExtractor
 
-class TextHandler:
+class TextService:
 
     _instance = None
     table_extractor: TableExtractor

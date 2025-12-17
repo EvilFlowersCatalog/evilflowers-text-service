@@ -1,36 +1,31 @@
-from text_handler.TextService import TextHandler
-
+from text_handler.TextService import TextService
+from semantic.SemanticService import SemanticService
 
 def main():
     document_path = "src/test_data/algebra-a-diskretna-matematika.pdf"
-    text_handler = TextHandler(document_path)
+    text_service = TextService(document_path)
+    semantic_service = SemanticService()
 
     # This will come from analyzer service
     found_toc = False
 
-    return text_handler.extract_text(found_toc), text_handler.extract_tables()
+    text_results = text_service.extract_text(found_toc)
+    tables = text_service.extract_tables()
+
+    pages, toc = text_results
+
+    chunks = text_service.process_text(pages)
+
+    result = semantic_service.index_document(chunks)
+
+    print('-' * 100)
+    print("example page: ", pages[9]['text'])
+    print('-' * 100)
+    # print('example chunk', chunks['chunks'][50])
+    print('-' * 100)
+    # print('embeddings example', embeddings[50])
+    print(result)
+
 
 if __name__ == "__main__":
-    text_results, tables = main()
-
-    pages_dict, toc = text_results
-   
-    # print("whole text object: ", text)
-    
-    # print("example page: ", text[0][9])
-    print('-' * 100)
-    # print("example page: ", text[2][9])
-    print('-' * 100)
-    print("example page: ", pages_dict[9]['text'])
-    # print("toc: ", text[3])
-    
-    # print("all paragraphs: ", text[1])
-    # print("example all paragraph for specific page: \n\n", text[1][10])
-    # print("example all paragraph for specific page: \n\n", text[1][10][1])
-
-    # print("all page sentences: ", text[2])
-    # print("all paragraph sentences: ", text[2][0])
-    # print("example sentence: ", text[2][0][1])
-
-    # print(tables)
-
+    main()
