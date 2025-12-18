@@ -12,7 +12,7 @@ import numpy as np
 import logging
 from datetime import datetime
 
-from config.semantic_config import SemanticConfig
+from config.Config import Config
 
 logger = logging.getLogger(__name__)
 
@@ -64,12 +64,12 @@ class MilvusManager:
         else:
             # Use regular Milvus server
             try:
-                logger.info(f"Connecting to Milvus server at {SemanticConfig.MILVUS_HOST}:{SemanticConfig.MILVUS_PORT}")
+                logger.info(f"Connecting to Milvus server at {Config.MILVUS_HOST}:{Config.MILVUS_PORT}")
                 
                 connections.connect(
                     alias="default",
-                    host=SemanticConfig.MILVUS_HOST,
-                    port=SemanticConfig.MILVUS_PORT
+                    host=Config.MILVUS_HOST,
+                    port=Config.MILVUS_PORT
                 )
                 
                 self._connected = True
@@ -81,7 +81,7 @@ class MilvusManager:
     
     def _setup_collection(self):
         """Create or load collection"""
-        collection_name = SemanticConfig.MILVUS_COLLECTION_NAME
+        collection_name = Config.MILVUS_COLLECTION_NAME
         
         # Define schema
         fields = [
@@ -92,7 +92,7 @@ class MilvusManager:
             FieldSchema(name="chunk_index", dtype=DataType.INT64),
             FieldSchema(name="text", dtype=DataType.VARCHAR, max_length=2000),
             FieldSchema(name="word_count", dtype=DataType.INT64),
-            FieldSchema(name="embedding", dtype=DataType.FLOAT_VECTOR, dim=SemanticConfig.EMBEDDING_DIM),
+            FieldSchema(name="embedding", dtype=DataType.FLOAT_VECTOR, dim=Config.EMBEDDING_DIM),
             FieldSchema(name="created_at", dtype=DataType.VARCHAR, max_length=50)
         ]
         
@@ -291,9 +291,9 @@ class MilvusManager:
     def get_stats(self) -> Dict:
         """Get collection statistics"""
         return {
-            "collection_name": SemanticConfig.MILVUS_COLLECTION_NAME,
+            "collection_name": Config.MILVUS_COLLECTION_NAME,
             "total_entities": self._collection.num_entities,
-            "embedding_dim": SemanticConfig.EMBEDDING_DIM
+            "embedding_dim": Config.EMBEDDING_DIM
         }
     
     def close(self):

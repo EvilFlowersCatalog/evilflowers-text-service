@@ -3,8 +3,7 @@ import numpy as np
 from sentence_transformers import SentenceTransformer
 from typing import List, Optional
 import logging
-
-from config.semantic_config import SemanticConfig
+from config.Config import Config
 
 logger = logging.getLogger(__name__)
 
@@ -30,12 +29,12 @@ class EmbeddingGenerator:
     def _load_model(self):
         """Load the sentence transformer model"""
         try:
-            logger.info(f"Loading model: {SemanticConfig.MODEL_NAME}")
-            logger.info(f"Using device: {SemanticConfig.DEVICE}")
+            logger.info(f"Loading model: {Config.MODEL_NAME}")
+            logger.info(f"Using device: {Config.DEVICE}")
             
             self._model = SentenceTransformer(
-                SemanticConfig.MODEL_NAME,
-                device=SemanticConfig.DEVICE
+                Config.MODEL_NAME,
+                device=Config.DEVICE
             )
             
             logger.info("✓ Model loaded successfully")
@@ -69,11 +68,11 @@ class EmbeddingGenerator:
             
             embeddings = self._model.encode(
                 texts,
-                batch_size=SemanticConfig.BATCH_SIZE,
+                batch_size=Config.BATCH_SIZE,
                 show_progress_bar=show_progress,
                 convert_to_numpy=True,
                 normalize_embeddings=normalize,
-                device=SemanticConfig.DEVICE
+                device=Config.DEVICE
             )
             
             logger.debug(f"Generated embeddings shape: {embeddings.shape}")
@@ -87,14 +86,4 @@ class EmbeddingGenerator:
         """Generate embedding for a single text"""
         embeddings = self.generate_embeddings([text], normalize=normalize)
         return embeddings[0] if len(embeddings) > 0 else np.array([])
-    
-    def get_model_info(self) -> dict:
-        """Get model information"""
-        return {
-            "model_name": SemanticConfig.MODEL_NAME,
-            "embedding_dim": SemanticConfig.EMBEDDING_DIM,
-            "max_sequence_length": SemanticConfig.MAX_SEQUENCE_LENGTH,
-            "device": SemanticConfig.DEVICE,
-            "batch_size": SemanticConfig.BATCH_SIZE
-        }
         

@@ -1,9 +1,7 @@
 from typing import Optional
-
 from llama_index.core import Document
 from llama_index.core.node_parser import SentenceSplitter
 from langdetect import detect, LangDetectException
-
 from config.Config import Config
 
 
@@ -16,20 +14,10 @@ class TextProcessor:
     - Chunk overlap for context preservation
     - Metadata attachment per chunk
     """
-
-    config = Config()
-
-    # 512 tokens ≈ 200-250 words for academic content
-    DEFAULT_CHUNK_SIZE = 768
-    DEFAULT_CHUNK_OVERLAP = 50
-    
-    def __init__(
-        self, 
-        chunk_size: int = DEFAULT_CHUNK_SIZE,
-        chunk_overlap: int = DEFAULT_CHUNK_OVERLAP
-    ):
-        self.chunk_size = chunk_size
-        self.chunk_overlap = chunk_overlap
+  
+    def __init__(self):
+        self.chunk_size = Config.CHUNK_SIZE
+        self.chunk_overlap = Config.CHUNK_OVERLAP
         
         self.splitter = SentenceSplitter(
             chunk_size=self.chunk_size,

@@ -3,7 +3,7 @@ import logging
 
 from semantic.EmbeddingGenerator import EmbeddingGenerator
 from semantic.MilvusManager import MilvusManager
-from config.semantic_config import SemanticConfig
+from config.Config import Config
 
 logger = logging.getLogger(__name__)
 
@@ -76,8 +76,7 @@ class SemanticService:
                 "document_id": document_id,
                 "success": True,
                 "chunks_indexed": len(inserted_ids),
-                "chunk_level": SemanticConfig.CHUNK_LEVEL,
-                "embedding_dim": SemanticConfig.EMBEDDING_DIM
+                "embedding_dim": Config.EMBEDDING_DIM
             }
             
         except Exception as e:

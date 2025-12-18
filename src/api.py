@@ -5,7 +5,7 @@ import uuid
 import httpx
 from text_handler.TextExtractor import TextExtractor
 from text_handler.TextProcessor import TextProcessor
-from text_handler.TextService import TextHandler
+from text_handler.TextService import TextService
 
 from elvira_elasticsearch_client import ElasticsearchClient # type: ignore
 
