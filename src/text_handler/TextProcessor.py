@@ -78,8 +78,9 @@ class TextProcessor:
                     'language': language,
                     'chunk_index': i,
                     'source_page': source_page,
-                    'section': section,
-                    'word_count': len(node.text.split())
+                    'section': section or "",  
+                    'word_count': len(node.text.split()),
+                    'text': node.text 
                 }
             })
         

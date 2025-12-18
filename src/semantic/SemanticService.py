@@ -21,7 +21,9 @@ class SemanticService:
         embeddings = self._generate_embeddings(chunks, document_id)
 
         # Store in Milvus
-        return self._store_embeddings(embeddings, chunks['metadata'])
+        chunk_list = chunks['chunks']
+        metadata = [chunk['metadata'] for chunk in chunk_list]
+        return self._store_embeddings(document_id, embeddings, metadata)
 
     
     def delete_document(self, document_id: str) -> Dict:

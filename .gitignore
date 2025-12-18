@@ -4,5 +4,7 @@ __pycache__
 
 src/test_data/
 .env
+reqs.txt
 
 test_local_garbage
+milvus_lite.db

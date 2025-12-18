@@ -87,11 +87,11 @@ class MilvusManager:
         fields = [
             FieldSchema(name="id", dtype=DataType.INT64, is_primary=True, auto_id=True),
             FieldSchema(name="document_id", dtype=DataType.VARCHAR, max_length=255),
-            FieldSchema(name="page_num", dtype=DataType.INT64),
-            FieldSchema(name="chunk_type", dtype=DataType.VARCHAR, max_length=50),
-            FieldSchema(name="paragraph_idx", dtype=DataType.INT64),
+            FieldSchema(name="source_page", dtype=DataType.INT64),
+            FieldSchema(name="section", dtype=DataType.VARCHAR, max_length=50),
+            FieldSchema(name="chunk_index", dtype=DataType.INT64),
             FieldSchema(name="text", dtype=DataType.VARCHAR, max_length=2000),
-            FieldSchema(name="text_length", dtype=DataType.INT64),
+            FieldSchema(name="word_count", dtype=DataType.INT64),
             FieldSchema(name="embedding", dtype=DataType.FLOAT_VECTOR, dim=SemanticConfig.EMBEDDING_DIM),
             FieldSchema(name="created_at", dtype=DataType.VARCHAR, max_length=50)
         ]
@@ -177,15 +177,14 @@ class MilvusManager:
         
         # Prepare data
         entities = [
-            [document_id] * len(embeddings),                      # document_id
-            [m.get("language", "unknown") for m in metadata],     # language
-            [m.get("chunk_index", 0) for m in metadata],          # chunk_index
-            [m.get("source_page", -1) for m in metadata],         # source_page
-            [m.get("section", "") for m in metadata],             # section
-            [m.get("word_count", 0) for m in metadata],           # word_count
-            [m.get("text", "")[:2000] for m in metadata],         # text (truncated preview)
-            embeddings.tolist(),                                   # embedding
-            [current_time] * len(embeddings)                      # created_at
+            [document_id] * len(embeddings),                          # document_id
+            [m.get("source_page", -1) for m in metadata],             # page_num
+            [m.get("section", "content") for m in metadata],          # chunk_type
+            [m.get("chunk_index", 0) for m in metadata],              # paragraph_idx
+            [m.get("text", "")[:2000] for m in metadata],             # text
+            [m.get("word_count", 0) for m in metadata],               # text_length
+            embeddings.tolist(),                                       # embedding
+            [current_time] * len(embeddings)                          # created_at
         ]
         
         # Insert
@@ -236,8 +235,8 @@ class MilvusManager:
             filter_expr = f'page_num == {page_num}'
         
         output_fields = [
-            "document_id", "page_num", "chunk_type",
-            "paragraph_idx", "text", "text_length"
+            "document_id", "source_page", "section",
+            "chunk_index", "text", "word_count"
         ]
         
         try:

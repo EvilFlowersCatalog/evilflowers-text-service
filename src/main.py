@@ -16,7 +16,7 @@ def main():
 
     chunks = text_service.process_text(pages)
 
-    result = semantic_service.index_document(chunks)
+    result = semantic_service.index_document('test', chunks)
 
     print('-' * 100)
     print("example page: ", pages[9]['text'])
