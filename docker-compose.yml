@@ -6,48 +6,125 @@ services:
     volumes:
       - ./temp:/app/temp
     depends_on:
-      - elasticsearch
+      # - elasticsearch
+      - search-service
     environment:
       - ELASTICSEARCH_URL=http://elasticsearch:9200
+      - SEARCH_SERVICE_URL=http://search-service:8001
     networks:
       - elk
 
-  elasticsearch:
-    image: docker.elastic.co/elasticsearch/elasticsearch:8.6.0
-    container_name: elvira-elasticsearch
-    environment:
-      - discovery.type=single-node
-      - ES_JAVA_OPTS=-Xms512m -Xmx512m
-      - xpack.security.enabled=false  # For development; disable for production use
+  search-service:
+    build:
+      context: /Users/buian/Desktop/personal/projects/elvira/evilflowers-search-service
+      dockerfile: Dockerfile
+    container_name: search-service
     volumes:
-      - elasticsearch-data:/usr/share/elasticsearch/data
+      - /Users/buian/Desktop/personal/projects/elvira/evilflowers-search-service:/app
     ports:
-      - "9200:9200"
-      - "9300:9300"
-    networks:
-      - elk
-    healthcheck:
-      test: ["CMD-SHELL", "curl -s http://localhost:9200 >/dev/null || exit 1"]
-      interval: 30s
-      timeout: 10s
-      retries: 3
-
-  kibana:
-    image: docker.elastic.co/kibana/kibana:8.6.0
-    container_name: elvira-kibana
+      - "8001:8001"
     environment:
-      - ELASTICSEARCH_HOSTS=http://elvira-elasticsearch:9200
-    ports:
-      - "5601:5601"
+      - MILVUS_HOST=milvus-standalone
+      - MILVUS_PORT=19530
+      - USE_MILVUS_LITE=false
     depends_on:
-      elasticsearch:
+      milvus-standalone:
         condition: service_healthy
     networks:
       - elk
+
+  # Milvus stack (only defined ONCE here)
+  milvus-etcd:
+    image: quay.io/coreos/etcd:v3.5.5
+    environment:
+      - ETCD_AUTO_COMPACTION_MODE=revision
+      - ETCD_AUTO_COMPACTION_RETENTION=1000
+      - ETCD_QUOTA_BACKEND_BYTES=4294967296
+      - ETCD_SNAPSHOT_COUNT=50000
+    volumes:
+      - milvus-etcd:/etcd
+    networks:
+      - elk
+
+  milvus-minio:
+    image: minio/minio:RELEASE.2023-03-20T20-16-18Z
+    environment:
+      MINIO_ROOT_USER: minioadmin
+      MINIO_ROOT_PASSWORD: minioadmin
+    volumes:
+      - milvus-minio:/minio_data
+    command: minio server /minio_data --console-address ":9001"
+    ports:
+      - "9000:9000"
+      - "9001:9001"
+    networks:
+      - elk
+
+  milvus-standalone:
+    platform: linux/amd64  # Add this line!
+    image: milvusdb/milvus:v2.3.3 
+    command: ["milvus", "run", "standalone"]  # Array format, not string!
+    container_name: milvus-standalone
+    environment:
+      ETCD_ENDPOINTS: milvus-etcd:2379
+      MINIO_ADDRESS: milvus-minio:9000
+      MILVUS_MODE: standalone
+      TZ: UTC
+    volumes:
+      - milvus-data:/var/lib/milvus
+    ports:
+      - "19530:19530"
+      - "9091:9091"
+    healthcheck:
+      test: ["CMD", "curl", "-f", "http://localhost:9091/healthz"]
+      interval: 10s
+      timeout: 5s
+      retries: 10
+    depends_on:
+      - milvus-etcd
+      - milvus-minio
+    networks:
+      - elk
+
+  # elasticsearch:
+  #   image: docker.elastic.co/elasticsearch/elasticsearch:8.6.0
+  #   container_name: elvira-elasticsearch
+  #   environment:
+  #     - discovery.type=single-node
+  #     - ES_JAVA_OPTS=-Xms512m -Xmx512m
+  #     - xpack.security.enabled=false
+  #   volumes:
+  #     - elasticsearch-data:/usr/share/elasticsearch/data
+  #   ports:
+  #     - "9200:9200"
+  #     - "9300:9300"
+  #   networks:
+  #     - elk
+  #   healthcheck:
+  #     test: ["CMD-SHELL", "curl -s http://localhost:9200 >/dev/null || exit 1"]
+  #     interval: 30s
+  #     timeout: 10s
+  #     retries: 3
+
+  # kibana:
+  #   image: docker.elastic.co/kibana/kibana:8.6.0
+  #   container_name: elvira-kibana
+  #   environment:
+  #     - ELASTICSEARCH_HOSTS=http://elvira-elasticsearch:9200
+  #   ports:
+  #     - "5601:5601"
+  #   depends_on:
+  #     elasticsearch:
+  #       condition: service_healthy
+  #   networks:
+  #     - elk
 
 networks:
   elk:
     driver: bridge
 
 volumes:
-  elasticsearch-data: 
+  elasticsearch-data:
+  milvus-etcd:
+  milvus-minio:
+  milvus-data:

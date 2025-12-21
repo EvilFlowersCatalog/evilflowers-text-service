@@ -6,5 +6,8 @@ src/test_data/
 .env
 reqs.txt
 
+# Local search service for testing
 test_local_garbage
+semantic
 milvus_lite.db
+src/test.py
