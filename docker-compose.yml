@@ -2,27 +2,39 @@ services:
   text-service:
     build: .
     ports:
-      - "8000:8000"
+      - "8010:8000"
     volumes:
       - ./temp:/app/temp
+      - ./logs:/var/log/text-service
+    # Log to both file and stdout, enable task events (-E)
+    # Remove --logfile to see logs in docker compose logs, or keep it for file logging
+    command: celery -A src.main worker --loglevel=INFO -E
     depends_on:
       # - elasticsearch
       - search-service
     environment:
       - ELASTICSEARCH_URL=http://elasticsearch:9200
       - SEARCH_SERVICE_URL=http://search-service:8001
+      # Connect to Django's Redis (must be on shared-redis network)
+      - REDIS_URL=redis://redis:6379/0
+      # Catalog API URL for downloading PDFs
+      - CATALOG_API_URL=http://host.docker.internal:8000
+      # Django SECRET_KEY for service-to-service authentication (must match SECRET_KEY in Django)
+      - CATALOG_SECRET_KEY=${CATALOG_SECRET_KEY:-oqjwvmob^(qwlil^8ub8%a@o5@a!^x0j1*^*1m@y46k%(6+w}
+      # Optional: CATALOG_API_KEY for authentication (alternative to secret key)
     networks:
       - elk
+      - shared-redis
 
   search-service:
     build:
-      context: /Users/buian/Desktop/personal/projects/elvira/evilflowers-search-service
+      context: /home/pc1/evilflowers-search-service
       dockerfile: Dockerfile
-    container_name: search-service
+    #container_name: search-service
     volumes:
-      - /Users/buian/Desktop/personal/projects/elvira/evilflowers-search-service:/app
+      - /home/pc1/evilflowers-search-service:/app
     ports:
-      - "8001:8001"
+      - "8011:8001"
     environment:
       - MILVUS_HOST=milvus-standalone
       - MILVUS_PORT=19530
@@ -32,6 +44,7 @@ services:
         condition: service_healthy
     networks:
       - elk
+      - shared-redis
 
   # Milvus stack (only defined ONCE here)
   milvus-etcd:
@@ -43,6 +56,16 @@ services:
       - ETCD_SNAPSHOT_COUNT=50000
     volumes:
       - milvus-etcd:/etcd
+    command: >
+      etcd
+      --name milvus-etcd
+      --data-dir /etcd
+      --listen-client-urls http://0.0.0.0:2379
+      --advertise-client-urls http://milvus-etcd:2379
+      --listen-peer-urls http://0.0.0.0:2380
+      --initial-advertise-peer-urls http://milvus-etcd:2380
+      --initial-cluster milvus-etcd=http://milvus-etcd:2380
+      --initial-cluster-state new
     networks:
       - elk
 
@@ -55,8 +78,8 @@ services:
       - milvus-minio:/minio_data
     command: minio server /minio_data --console-address ":9001"
     ports:
-      - "9000:9000"
-      - "9001:9001"
+      - "9200:9000"
+      - "9201:9001"
     networks:
       - elk
 
@@ -64,7 +87,7 @@ services:
     platform: linux/amd64  # Add this line!
     image: milvusdb/milvus:v2.3.3 
     command: ["milvus", "run", "standalone"]  # Array format, not string!
-    container_name: milvus-standalone
+    #container_name: milvus-standalone
     environment:
       ETCD_ENDPOINTS: milvus-etcd:2379
       MINIO_ADDRESS: milvus-minio:9000
@@ -77,54 +100,38 @@ services:
       - "9091:9091"
     healthcheck:
       test: ["CMD", "curl", "-f", "http://localhost:9091/healthz"]
-      interval: 10s
-      timeout: 5s
-      retries: 10
+      interval: 30s
+      timeout: 20s
+      retries: 3
+      start_period: 90s
     depends_on:
       - milvus-etcd
       - milvus-minio
     networks:
       - elk
 
-  # elasticsearch:
-  #   image: docker.elastic.co/elasticsearch/elasticsearch:8.6.0
-  #   container_name: elvira-elasticsearch
-  #   environment:
-  #     - discovery.type=single-node
-  #     - ES_JAVA_OPTS=-Xms512m -Xmx512m
-  #     - xpack.security.enabled=false
-  #   volumes:
-  #     - elasticsearch-data:/usr/share/elasticsearch/data
-  #   ports:
-  #     - "9200:9200"
-  #     - "9300:9300"
-  #   networks:
-  #     - elk
-  #   healthcheck:
-  #     test: ["CMD-SHELL", "curl -s http://localhost:9200 >/dev/null || exit 1"]
-  #     interval: 30s
-  #     timeout: 10s
-  #     retries: 3
-
-  # kibana:
-  #   image: docker.elastic.co/kibana/kibana:8.6.0
-  #   container_name: elvira-kibana
-  #   environment:
-  #     - ELASTICSEARCH_HOSTS=http://elvira-elasticsearch:9200
-  #   ports:
-  #     - "5601:5601"
-  #   depends_on:
-  #     elasticsearch:
-  #       condition: service_healthy
-  #   networks:
-  #     - elk
-
-networks:
-  elk:
-    driver: bridge
+  redis-commander:
+    image: rediscommander/redis-commander:latest
+    container_name: redis-commander
+    environment:
+      - REDIS_HOSTS=local:redis:6379
+      - HTTP_USER=admin
+      - HTTP_PASSWORD=admin
+    ports:
+      - "8081:8081"
+    networks:
+      - shared-redis
+    depends_on:
+      - text-service  # Wait for text-service to be ready (which depends on Redis)
 
 volumes:
   elasticsearch-data:
   milvus-etcd:
   milvus-minio:
   milvus-data:
+
+networks:
+  elk:
+    driver: bridge
+  shared-redis:
+    external: true

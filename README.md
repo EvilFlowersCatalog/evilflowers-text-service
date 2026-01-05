@@ -72,29 +72,27 @@ python src/main.py
 - Specialized component for extracting tabular data from documents
 - (Implementation in progress)
 
-### API Endpoints
+### Celery Tasks
 
-FastAPI server exposing:
+The service runs as a Celery worker that processes tasks from a Redis message broker:
 
-- POST `/process_text`
-  - Accepts PDF file uploads
+- `text_service.process_pdf` (task name)
+  - Triggered by EvilFlowersCatalog when a PDF acquisition is created
+  - Accepts `acquisition_id` as parameter
+  - Downloads PDF from Django API
   - Extracts text content
-  - Stores processed text in Elasticsearch
-  - Returns extracted text and document ID
+  - Processes text into chunks
+  - Sends processed chunks to search-service for indexing
 
-## Configuration
-
-Environment variables (via .env):
-- Configurable through Config class
-- Uses python-dotenv for environment variable management
 
 ## Docker Support
 
 Containerized deployment with:
 - Python base image
-- FastAPI server exposed on port 8000
-- Temporary file storage for uploads
-- Integration with Elasticsearch service
+- Celery worker (no HTTP server)
+- Temporary file storage for PDF downloads
+- Integration with Redis (message broker)
+- Integration with search-service for indexing
 
 ## Requirements
 
@@ -102,11 +100,11 @@ Containerized deployment with:
 - pip
 - make
 - Key dependencies:
-  - FastAPI
+  - Celery (task queue)
+  - Redis (message broker)
   - PyMuPDF (fitz)
   - python-dotenv
-  - httpx
-  - uvicorn
+  - requests
   - ocrmypdf
   - pytesseract
   - pdf2image
@@ -116,5 +114,19 @@ Containerized deployment with:
 ## Integration
 
 The service integrates with:
-- Elasticsearch service for document storage
-- Configurable for additional service integrations
+- **EvilFlowersCatalog** (Django): Receives Celery tasks when PDF acquisitions are created
+- **Redis**: Message broker for Celery task queue
+- **Search Service**: Sends processed text chunks for indexing
+- **Django API**: Downloads PDF files via HTTP API
+
+## Configuration
+
+Environment variables (via .env):
+- `REDIS_URL`: Redis broker URL (default: `redis://redis:6379/0`)
+- `CATALOG_API_URL`: Django catalog API URL (default: `http://catalog:8000`)
+- `CATALOG_API_KEY`: Optional Bearer token for service-to-service authentication (default: `None`)
+- `SEARCH_SERVICE_URL`: Search service URL (default: `http://localhost:8001`)
+- `CHUNK_SIZE`: Text chunk size for processing (default: `768`)
+- `CHUNK_OVERLAP`: Overlap between chunks (default: `50`)
+
+**Note**: If `CATALOG_API_KEY` is not set, the service will attempt to download PDFs without authentication. This works for open-access acquisitions. For protected acquisitions, you'll need to configure an API key.

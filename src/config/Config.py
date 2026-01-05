@@ -29,3 +29,8 @@ class Config:
     TASK_SERIALIZER = 'json'
     ACCEPT_CONTENT = ['json']
     RESULT_SERIALIZER = 'json'
+    
+    # Django Catalog API (for fetching PDFs)
+    CATALOG_API_URL = os.getenv('CATALOG_API_URL', 'http://catalog:8000')
+    CATALOG_SECRET_KEY = os.getenv('CATALOG_SECRET_KEY', None)  # Django SECRET_KEY for service-to-service auth
+    CATALOG_API_KEY = os.getenv('CATALOG_API_KEY', None)  # Optional: Bearer token for service-to-service auth

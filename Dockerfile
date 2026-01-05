@@ -20,8 +20,5 @@ COPY src/ ./src/
 
 ENV PYTHONPATH=/app/src:$PYTHONPATH
 
-# Expose port
-EXPOSE 8000
-
-# Run the FastAPI application
-CMD ["celery", "-A", "src.main", "worker", "--loglevel=info"]
+# Run Celery worker with task events enabled for better monitoring
+CMD ["celery", "-A", "src.main", "worker", "--loglevel=info", "-E"]
