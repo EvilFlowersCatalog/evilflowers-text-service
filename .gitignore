@@ -11,3 +11,6 @@ test_local_garbage
 semantic
 milvus_lite.db
 src/test.py
+
+# Dev
+docker-compose.override.yml
