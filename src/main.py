@@ -62,8 +62,6 @@ def process_pdf_task(self: Task, source: str, entry_id: str):
         },
         timeout=300
     )
-
-    print(response)
     
     # if response.status_code != 200:
     #     logger.error(f"Failed to download PDF: status={response.status_code}, url={acquisition_url}")

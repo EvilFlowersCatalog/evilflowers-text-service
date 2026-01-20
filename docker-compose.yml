@@ -12,9 +12,15 @@ services:
       - redis
     environment:
       - SEARCH_SERVICE_URL=http://search-service:8001
-      - TABLE_EXTRACTOR=PdfPlumber
-      - TEXT_EXTRACTOR_MODE=None
       - STORAGE_PATH=/app/src/test_data
+      - PYTHONUNBUFFERED=1
+    command: >
+      watchmedo auto-restart 
+      --directory=/app/src 
+      --pattern='*.py' 
+      --recursive 
+      -- 
+      celery -A src.main worker --loglevel=info -E --pool=solo --queues=evilflowers_text_worker
     networks:
       - elk
       # - shared-redis
@@ -35,6 +41,7 @@ services:
     #   - MILVUS_HOST=milvus-standalone
     #   - MILVUS_PORT=19530
     #   - USE_MILVUS_LITE=false
+    command: ["uvicorn", "src.api:app", "--host", "0.0.0.0", "--port", "8001", "--reload"]
     networks:
       - elk
       # - shared-redis
