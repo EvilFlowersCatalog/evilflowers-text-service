@@ -5,16 +5,23 @@ services:
     ports:
       - "8010:8000"
     volumes:
-      - /Users/buian/Desktop/personal/projects/elvira/evilflowers-text-service:/app
+      - /Users/richardcernansky/Desktop/TP/evilflowers-text-service-tp2025:/app
     depends_on:
-      # - elasticsearch
+      - elasticsearch
       - search-service
       - redis
     environment:
       - SEARCH_SERVICE_URL=http://search-service:8001
       - TABLE_EXTRACTOR=PdfPlumber
       - TEXT_EXTRACTOR_MODE=None
-      - STORAGE_PATH=/app/src/test_data
+      - STORAGE_PATH=/app/src/data
+    command: >
+      watchmedo auto-restart 
+      --directory=/app/src 
+      --pattern='*.py' 
+      --recursive 
+      -- 
+      celery -A src.main worker --loglevel=info -E --pool=solo --queues=evilflowers_text_worker
     networks:
       - elk
       # - shared-redis
@@ -23,18 +30,21 @@ services:
     container_name: search-service
     
     build:
-      context: /Users/buian/Desktop/personal/projects/elvira/evilflowers-search-service
+      context: /Users/richardcernansky/Desktop/TP/evilflowers-search-service
       dockerfile: Dockerfile
     volumes:
-      - /Users/buian/Desktop/personal/projects/elvira/evilflowers-search-service:/app
+      - /Users/richardcernansky/Desktop/TP/evilflowers-search-service:/app
       - ~/.cache/huggingface:/root/.cache/huggingface
     ports:
       - "8001:8001"
     environment:
       - ELASTICSEARCH_HOST=http://elasticsearch:9200
-    #   - MILVUS_HOST=milvus-standalone
+      - ELASTICSEARCH_INDEX=evilflowers   
+      - MILVUS_LITE_DB=/tmp/milvus_lite.db
+    # - MILVUS_HOST=milvus-standalone
     #   - MILVUS_PORT=19530
-    #   - USE_MILVUS_LITE=false
+      - USE_MILVUS_LITE=true
+    command: ["uvicorn", "src.api:app", "--host", "0.0.0.0", "--port", "8001", "--reload"]
     networks:
       - elk
       # - shared-redis
@@ -125,6 +135,7 @@ services:
     environment:
       - discovery.type=single-node
       - xpack.security.enabled=false
+      - "ES_JAVA_OPTS=-Xms512m -Xmx512m"
     ports:
       - "9200:9200"
     networks:

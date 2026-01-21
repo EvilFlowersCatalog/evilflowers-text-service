@@ -27,3 +27,4 @@ langdetect
 celery
 redis
 requests
+watchdog[watchmedo]

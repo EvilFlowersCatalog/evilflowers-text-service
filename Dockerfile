@@ -26,8 +26,6 @@ COPY requirements.txt .
 RUN pip install --upgrade pip && \
     pip install -r requirements.txt
 
-# Copy application code
-COPY src/ ./src/
 
 ENV PYTHONPATH=/app/src:$PYTHONPATH
 
