@@ -27,4 +27,6 @@ langdetect
 celery
 redis
 requests
+
+# Testing only
 watchdog[watchmedo]

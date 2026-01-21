@@ -26,7 +26,6 @@ COPY requirements.txt .
 RUN pip install --upgrade pip && \
     pip install -r requirements.txt
 
-
 ENV PYTHONPATH=/app/src:$PYTHONPATH
 
 # Run the Celery worker
