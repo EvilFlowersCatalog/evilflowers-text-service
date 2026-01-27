@@ -30,6 +30,15 @@ app.conf.update(
     task_send_sent_event=True,     # Send events when tasks are sent
 )
 
+@app.task(bind=True, name="evilflowers_text_worker.stats", queue="evilflowers_text_worker")
+def stats_task(self: Task):
+    resp = requests.get(f"{Config.SEARCH_SERVICE_URL}/stats", timeout=30)
+    resp.raise_for_status()
+    stats = resp.json()
+    print(stats)
+    return stats
+
+
 @app.task(bind=True, name='evilflowers_text_worker.process_pdf', queue='evilflowers_text_worker')
 def process_pdf_task(self: Task, source: str, entry_id: str):
     """
@@ -54,6 +63,7 @@ def process_pdf_task(self: Task, source: str, entry_id: str):
     chunks = text_service.process_text(pages)
     
     # 4. Send to search-service
+    print(f"Indexing document ID: {entry_id} with {len(chunks['chunks'])} chunks")
     response = requests.post(
         f"{Config.SEARCH_SERVICE_URL}/index",
         json={
@@ -68,6 +78,18 @@ def process_pdf_task(self: Task, source: str, entry_id: str):
     #     raise Exception(f"Failed to download PDF from catalog API: {response.status_code} - {response.text}")
     
     return response.json()
+
+
+@app.task(bind=True, name="evilflowers_text_worker.delete_document", queue="evilflowers_text_worker")
+def delete_document_task(self: Task, document_id: str):
+    resp = requests.delete(
+        f"{Config.SEARCH_SERVICE_URL}/documents/{document_id}",
+        timeout=60,
+    )
+    resp.raise_for_status()
+    result = resp.json()
+    print(result)
+    return result
 
 
 # if __name__ == '__main__':
