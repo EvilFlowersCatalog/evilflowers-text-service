@@ -8,9 +8,11 @@ class Config:
     TABLE_EXTRACTOR_MODE = os.getenv('TABLE_EXTRACTOR_MODE', 'lattice')
 
     # # Milvus Vector Database
-    # MILVUS_HOST = os.getenv('MILVUS_HOST', 'localhost')
-    # MILVUS_PORT = int(os.getenv('MILVUS_PORT', '19530'))
-    # MILVUS_COLLECTION_NAME = os.getenv('MILVUS_COLLECTION_NAME', 'document_embeddings')
+    # MILVUS_HOST = os.getenv('MILVUS_HOST')
+    # MILVUS_PORT = int(os.getenv('MILVUS_PORT'))
+    # MILVUS_COLLECTION_NAME = os.getenv('MILVUS_COLLECTION_NAME')
+    # MILVUS_MAX_TEXT_LENGTH = int(os.getenv('MILVUS_MAX_TEXT_LENGTH'))
+    
     
     # # Embeddings
     # MODEL_NAME = "sentence-transformers/stsb-xlm-r-multilingual"

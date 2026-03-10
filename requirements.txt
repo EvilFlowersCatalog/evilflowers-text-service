@@ -30,3 +30,6 @@ requests
 
 # Testing only
 watchdog[watchmedo]
+
+#Milvus
+pymilvus

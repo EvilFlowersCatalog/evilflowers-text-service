@@ -9,12 +9,12 @@ from config.Config import Config
 from io import BytesIO
 
 # EDITOR -> we need to consider how this would work on the server + what model to use, test them
-import nltk
-from nltk.tokenize import sent_tokenize
-try:
-    nltk.data.find('tokenizers/punkt_tab/slovak.pickle')
-except LookupError:
-    nltk.download('punkt_tab')
+# import nltk
+# from nltk.tokenize import sent_tokenize
+# try:
+#     nltk.data.find('tokenizers/punkt_tab/slovak.pickle')
+# except LookupError:
+#     nltk.download('punkt_tab')
 
 class TextExtractor:
     config = Config()
@@ -24,11 +24,6 @@ class TextExtractor:
         self._validate(document_path)
         self._document_path = document_path
 
-    # EDITOR -> Wtf is this for
-    def set_document_path(self, document_path: str):
-        self._document_path = document_path
-
-    ##
     # Fitz/Digital text based functions
     def extract(self) -> tuple[list[dict[str, any]], list | None]:
         """
@@ -56,7 +51,6 @@ class TextExtractor:
     
         return pages,  toc
 
-    ##
     # Private functions
     # EDITOR -> Add python esque looping like in the extract digital function
     def _is_digital(self, doc: fitz.Document) -> bool:
@@ -126,14 +120,13 @@ class TextExtractor:
             # paragraphs.append(page_paragraphs)
 
             # Extract page-level sentences using NLP
-            page_sentences = sent_tokenize(page_text)
+            # page_sentences = sent_tokenize(page_text)
             # sentences.append(page_sentences)
 
             pages.append({
                 'page_num': page_num,
                 'text': page_text,
                 'paragraphs': page_paragraphs,
-                'sentences': page_sentences
             })
 
         return pages, toc
@@ -169,22 +162,22 @@ class TextExtractor:
             page_paragraphs = self._split_into_paragraphs(page_text)            
             # paragraphs.append(page_paragraphs)
 
-            page_sentences = []
-            for paragraph_num, paragraph in enumerate(page_paragraphs):
-                paragraph_text = paragraph
-                paragraph_sentences = paragraph_text.split(".")
-                paragraph_sentence = []
-                for i, sentence in enumerate(paragraph_sentences):
-                    if sentence.strip():  # Only add non-empty sentences
-                        paragraph_sentence.append(sentence.strip())
-                page_sentences.append(paragraph_sentence)
+            # page_sentences = []
+            # for paragraph_num, paragraph in enumerate(page_paragraphs):
+            #     paragraph_text = paragraph
+            #     paragraph_sentences = paragraph_text.split(".")
+            #     paragraph_sentence = []
+            #     for i, sentence in enumerate(paragraph_sentences):
+            #         if sentence.strip():  # Only add non-empty sentences
+            #             paragraph_sentence.append(sentence.strip())
+                # page_sentences.append(paragraph_sentence)
             # sentences.append(page_sentences)
 
             pages.append({
                 'page_num': page_num,
                 'text': page_text,
                 'paragraphs': page_paragraphs,
-                'sentences': page_sentences
+                # 'sentences': page_sentences
             })
 
         # except Exception as e:

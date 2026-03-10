@@ -5,7 +5,7 @@ services:
     ports:
       - "8010:8000"
     volumes:
-      - /Users/richardcernansky/Desktop/TP/evilflowers-text-service-tp2025:/app
+      - /home/xbuianh/evilflowers-text-service:/app
     depends_on:
       - elasticsearch
       - search-service
@@ -28,23 +28,27 @@ services:
 
   search-service:
     container_name: search-service
-    
     build:
-      context: /Users/richardcernansky/Desktop/TP/evilflowers-search-service
+      context: /home/xbuianh/evilflowers-search-service
       dockerfile: Dockerfile
     volumes:
-      - /Users/richardcernansky/Desktop/TP/evilflowers-search-service:/app
+      - /home/xbuianh/evilflowers-search-service:/app
       - ~/.cache/huggingface:/root/.cache/huggingface
     ports:
       - "8001:8001"
     environment:
       - ELASTICSEARCH_HOST=http://elasticsearch:9200
       - ELASTICSEARCH_INDEX=evilflowers   
-      - MILVUS_LITE_DB=/tmp/milvus_lite.db
-    # - MILVUS_HOST=milvus-standalone
-    #   - MILVUS_PORT=19530
-      - USE_MILVUS_LITE=true
-    command: ["uvicorn", "src.api:app", "--host", "0.0.0.0", "--port", "8001", "--reload"]
+      - USE_MILVUS_LITE=false
+      - MILVUS_HOST=milvus-standalone
+      - MILVUS_COLLECTION_NAME=document_embeddings
+      - MILVUS_MAX_TEXT_LENGTH=8000
+      - MILVUS_PORT=19530  
+    command: ["uvicorn", "src.api:app", "--host", "0.0.0.0", "--port", "8001", "--reload", "--reload-dir", "/app/src"]
+
+    depends_on:
+      - elasticsearch
+      - milvus-standalone
     networks:
       - elk
       # - shared-redis
@@ -62,72 +66,58 @@ services:
     networks:
       - elk 
 
-  # Milvus stack (only defined ONCE here)
-  # milvus-etcd:
-  #   image: quay.io/coreos/etcd:v3.5.5
-  #   environment:
-  #     - ETCD_AUTO_COMPACTION_MODE=revision
-  #     - ETCD_AUTO_COMPACTION_RETENTION=1000
-  #     - ETCD_QUOTA_BACKEND_BYTES=4294967296
-  #     - ETCD_SNAPSHOT_COUNT=50000
-  #   volumes:
-  #     - milvus-etcd:/etcd
-  #   networks:
-  #     - elk
+  milvus-etcd:
+    image: quay.io/coreos/etcd:v3.5.5
+    command: etcd -advertise-client-urls=http://127.0.0.1:2379 -listen-client-urls http://0.0.0.0:2379 --data-dir /etcd
+    environment:
+      - ETCD_AUTO_COMPACTION_MODE=revision
+      - ETCD_AUTO_COMPACTION_RETENTION=1000
+      - ETCD_QUOTA_BACKEND_BYTES=4294967296
+      - ETCD_SNAPSHOT_COUNT=50000
+    volumes:
+      - milvus-etcd:/etcd
+    networks:
+      - elk
 
-  # milvus-minio:
-  #   image: minio/minio:RELEASE.2023-03-20T20-16-18Z
-  #   environment:
-  #     MINIO_ROOT_USER: minioadmin
-  #     MINIO_ROOT_PASSWORD: minioadmin
-  #   volumes:
-  #     - milvus-minio:/minio_data
-  #   command: minio server /minio_data --console-address ":9001"
-  #   ports:
-  #     - "9000:9000"
-  #     - "9001:9001"
-  #   networks:
-  #     - elk
+  milvus-minio:
+    image: minio/minio:RELEASE.2023-03-20T20-16-18Z
+    environment:
+      MINIO_ROOT_USER: minioadmin
+      MINIO_ROOT_PASSWORD: minioadmin
+    volumes:
+      - milvus-minio:/minio_data
+    command: minio server /minio_data --console-address ":9001"
+    ports:
+      - "9000:9000"
+      - "9001:9001"
+    networks:
+      - elk
 
-  # milvus-standalone:
-  #   platform: linux/amd64  # Add this line!
-  #   image: milvusdb/milvus:v2.3.3 
-  #   command: ["milvus", "run", "standalone"]  # Array format, not string!
-  #   container_name: milvus-standalone
-  #   environment:
-  #     ETCD_ENDPOINTS: milvus-etcd:2379
-  #     MINIO_ADDRESS: milvus-minio:9000
-  #     MILVUS_MODE: standalone
-  #     TZ: UTC
-  #   volumes:
-  #     - milvus-data:/var/lib/milvus
-  #   ports:
-  #     - "19530:19530"
-  #     - "9091:9091"
-  #   healthcheck:
-  #     test: ["CMD", "curl", "-f", "http://localhost:9091/healthz"]
-  #     interval: 10s
-  #     timeout: 5s
-  #     retries: 10
-  #   depends_on:
-  #     - milvus-etcd
-  #     - milvus-minio
-  #   networks:
-  #     - elk
-
-  # redis-commander:
-  #   image: rediscommander/redis-commander:latest
-  #   container_name: redis-commander
-  #   environment:
-  #     - REDIS_HOSTS=local:redis:6379
-  #     - HTTP_USER=admin
-  #     - HTTP_PASSWORD=admin
-  #   ports:
-  #     - "8081:8081"
-  #   networks:
-  #     - shared-redis
-  #   depends_on:
-  #     - text-service  # Wait for text-service to be ready (which depends on Redis)
+  milvus-standalone:
+    platform: linux/amd64 
+    image: milvusdb/milvus:v2.3.3 
+    command: ["milvus", "run", "standalone"]
+    container_name: milvus-standalone
+    environment:
+      ETCD_ENDPOINTS: milvus-etcd:2379
+      MINIO_ADDRESS: milvus-minio:9000
+      MILVUS_MODE: standalone
+      TZ: UTC
+    volumes:
+      - milvus-data:/var/lib/milvus
+    ports:
+      - "19530:19530"
+      - "9091:9091"
+    healthcheck:
+      test: ["CMD", "curl", "-f", "http://localhost:9091/healthz"]
+      interval: 10s
+      timeout: 5s
+      retries: 10
+    depends_on:
+      - milvus-etcd
+      - milvus-minio
+    networks:
+      - elk
 
   elasticsearch:
     image: docker.elastic.co/elasticsearch/elasticsearch:8.11.0
@@ -145,9 +135,9 @@ services:
 
 volumes:
   elasticsearch-data:
-  # milvus-etcd:
-  # milvus-minio:
-  # milvus-data:
+  milvus-etcd:
+  milvus-minio:
+  milvus-data:
   redis-data:
 
 networks:

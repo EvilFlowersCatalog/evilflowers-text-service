@@ -59,18 +59,20 @@ class TextProcessor:
             source_page = self._find_source_page(node.start_char_idx or 0, page_offsets)
             section = self._find_section(source_page, toc) if toc else None
             
-            chunks.append({
+            chunk_data = {
                 'text': node.text,
                 'metadata': {
                     'doc_id': doc_id,
                     'language': language,
-                    'chunk_index': i,
+                    'chunk_index': i,  # ← Should always be set here
                     'source_page': source_page,
                     'section': section or "",  
                     'word_count': len(node.text.split()),
-                    'text': node.text 
+                    'text': node.text
                 }
-            })
+            }
+            
+            chunks.append(chunk_data)
         
         return {
             'doc_id': doc_id,
