@@ -6,6 +6,7 @@ services:
       - "8010:8000"
     volumes:
       - /home/xbuianh/evilflowers-text-service:/app
+      - /mnt/data/catalogs:/app/src/data/catalogs:ro
     depends_on:
       - elasticsearch
       - search-service
