@@ -6,6 +6,7 @@ services:
       - "8010:8000"
     volumes:
       - /home/xbuianh/evilflowers-text-service:/app
+      - /mnt/data/catalogs:/app/src/data/catalogs:ro
     depends_on:
       - elasticsearch
       - search-service
@@ -44,7 +45,7 @@ services:
       - MILVUS_COLLECTION_NAME=document_embeddings
       - MILVUS_MAX_TEXT_LENGTH=8000
       - MILVUS_PORT=19530  
-    command: ["uvicorn", "src.api:app", "--host", "0.0.0.0", "--port", "8001", "--reload", "--reload-dir", "/app/src"]
+    command: ["uvicorn", "src.main:app", "--host", "0.0.0.0", "--port", "8001", "--reload", "--reload-dir", "/app/src"]
 
     depends_on:
       - elasticsearch

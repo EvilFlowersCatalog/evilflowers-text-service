@@ -16,3 +16,5 @@ src/test.py
 docker-compose.override.yml
 docker-compose.yml
 *.code-workspace
+
+data/

@@ -30,17 +30,6 @@ class TextExtractor:
         Extract everything in one pass through the PDF
         Returns: (pages, paragraphs, metadata)
         """
-        # EDITOR -> maybe add json structure instead of list index alignment its more human readable
-        # {
-        #     'page_num': 1,
-        #     'text': "full page text...",
-        #     'paragraphs': [
-        #         {
-        #             'text': "paragraph text...",
-        #             'sentences': ["sent1", "sent2"]
-        #         }
-        #     ]
-        # }
         doc = self._load_document()
 
         if self._is_digital(doc):
@@ -54,14 +43,20 @@ class TextExtractor:
     # Private functions
     # EDITOR -> Add python esque looping like in the extract digital function
     def _is_digital(self, doc: fitz.Document) -> bool:
-        """Check if PDF has extractable text or needs OCR"""
-        # Sample first few pages
-        for page_num in range(min(30, doc.page_count)):
+        import random
+        total = doc.page_count
+        start = int(total * 0.1)
+        end = int(total * 0.9)
+        population = range(start, end)
+        sample_size = min(20, len(population))
+        pages = random.Random(42).sample(list(population), sample_size)
+        digital_pages = 0
+        for page_num in pages:
             page = doc.load_page(page_num)
             text = page.get_text("text").strip()
-            if len(text) > 100:  # arbitrary threshold
-                return True
-        return False
+            if len(text) > 100:
+                digital_pages += 1
+        return (digital_pages / sample_size) >= 0.5
 
     def _check_toc(self, pages: list[dict[str, any]]) -> bool:  
         toc_keywords = ["Table of Contents", "Chapter", "Section", "Contents"]
