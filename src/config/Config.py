@@ -36,3 +36,5 @@ class Config:
     CATALOG_API_URL = os.getenv('CATALOG_API_URL', 'http://catalog:8000')
     CATALOG_SECRET_KEY = os.getenv('CATALOG_SECRET_KEY', None)  # Django SECRET_KEY for service-to-service auth
     CATALOG_API_KEY = os.getenv('CATALOG_API_KEY', None)  # Optional: Bearer token for service-to-service auth
+
+    YOLO_MODEL_PATH = os.getenv('YOLO_MODEL_PATH', 'src/models/doclayout_yolo_doclaynet_imgsz1120_docsynth_pretrain.pt')

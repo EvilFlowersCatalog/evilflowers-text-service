@@ -1,36 +1,29 @@
 import os
+import re
+import numpy as np
 import fitz
 import ocrmypdf
-import tempfile
-import re
 import pytesseract
-from pdf2image import convert_from_path, convert_from_bytes
+from PIL import Image
+from pdf2image import convert_from_bytes
+from doclayout_yolo import YOLOv10
 from config.Config import Config
 from io import BytesIO
-
-# EDITOR -> we need to consider how this would work on the server + what model to use, test them
-# import nltk
-# from nltk.tokenize import sent_tokenize
-# try:
-#     nltk.data.find('tokenizers/punkt_tab/slovak.pickle')
-# except LookupError:
-#     nltk.download('punkt_tab')
 
 class TextExtractor:
     config = Config()
     _document_path: str
 
     def __init__(self, document_path: str):
-        self._validate(document_path)
         self._document_path = document_path
 
-    # Fitz/Digital text based functions
+    # Public functions
     def extract(self) -> tuple[list[dict[str, any]], list | None]:
         """
         Extract everything in one pass through the PDF
         Returns: (pages, paragraphs, metadata)
         """
-        doc = self._load_document()
+        doc = fitz.open(self._document_path)
 
         if self._is_digital(doc):
             pages, toc = self._extract_digital(doc)
@@ -57,30 +50,74 @@ class TextExtractor:
             if len(text) > 100:
                 digital_pages += 1
         return (digital_pages / sample_size) >= 0.5
-
-    def _check_toc(self, pages: list[dict[str, any]]) -> bool:  
-        toc_keywords = ["Table of Contents", "Chapter", "Section", "Contents"]
-        for page in pages:
-            text = page[1]
-            if text:
-                for keyword in toc_keywords:
-                    if keyword in text:
-                        return True
-        return False
     
-    def _extract_toc(self, pages: list[dict[str, any]]) -> any:
-        # TODO: Implement TOC extraction
-        pass
+    def _extract_toc(self, source: fitz.Document | list) -> list | None:
+        if isinstance(source, fitz.Document):
+            toc = source.get_toc()
+            if toc is not None:
+                return toc
 
-    def _load_document(self) -> fitz.Document:
-        doc = fitz.open(self._document_path)
-        return doc
-    
-    def _validate(self, document_path: str):
-        assert os.path.exists(
-            document_path
-        ), f"Document path did not found: {document_path}"
+        yolo = YOLOv10(Config.YOLO_MODEL_PATH)
 
+        if isinstance(source, fitz.Document):
+            pages_to_scan = range(min(20, source.page_count))
+
+            for page_idx in pages_to_scan:
+                page = source.load_page(page_idx)
+                pix = page.get_pixmap(dpi=150)
+                img = Image.frombytes("RGB", [pix.width, pix.height], pix.samples)
+
+                list_items = self._get_list_items(yolo, img)
+                if not list_items:
+                    continue
+
+                blocks = page.get_text("blocks")
+                toc = []
+                for x1, y1, x2, y2 in list_items:
+                    margin = 5
+                    node_text = " ".join(
+                        self._clean_whitespace(b[4]) for b in blocks
+                        if x1 - margin <= b[0] <= x2 + margin and y1 - margin <= b[1] <= y2 + margin
+                    ).strip()
+                    entry = self._parse_toc_line(node_text, x1)
+                    if entry:
+                        toc.append(entry)
+                return toc if toc else None
+
+        else:
+            for img in source[:10]:
+                list_items = self._get_list_items(yolo, img)
+                if not list_items:
+                    continue
+
+                toc = []
+                for x1, y1, x2, y2 in list_items:
+                    cropped = img.crop((x1, y1, x2, y2))
+                    node_text = pytesseract.image_to_string(cropped).strip()
+                    entry = self._parse_toc_line(node_text, x1)
+                    if entry:
+                        toc.append(entry)
+                return toc if toc else None
+
+        return None
+
+    def _get_list_items(self, yolo, img) -> list:
+        results = yolo.predict(source=img, imgsz=1120, conf=0.2, iou=0.5, agnostic_nms=True, verbose=False)
+        result = results[0]
+        return sorted(
+            [box.xyxy[0].tolist() for box in result.boxes if result.names[int(box.cls[0].item())] == 'List-item'],
+            key=lambda b: b[1]
+        )
+
+    def _parse_toc_line(self, text: str, x1: float) -> list | None:
+        if not text:
+            return None
+        match = re.search(r'^(.*?)\s*[\.\s]{2,}\s*(\d+)\s*$', text) or \
+                re.search(r'^(.*?)\s+(\d+)\s*$', text)
+        if not match:
+            return None
+        return [1 + int(x1 // 50), match.group(1).strip(), int(match.group(2))]
+        
     def _clean_whitespace(self, text: str) -> str:
         # Fix hyphenated line breaks
         text = re.sub(r'(\w+)-\n(\w+)', r'\1\2', text)
@@ -91,7 +128,7 @@ class TextExtractor:
         return text.strip()
     
     def _extract_digital(self, doc: fitz.Document) -> tuple[list[dict[str, any]], list]:
-        toc = doc.get_toc()
+        toc = self._extract_toc(doc)
 
         pages = []
         # paragraphs = []
@@ -125,71 +162,48 @@ class TextExtractor:
             })
 
         return pages, toc
-
-    def extract_toc(self, pages: list[dict[str, any]], found_toc: bool) -> any:
-        if found_toc:
-            return self._extract_toc(pages)
-        # TODO: This will find the TOC but when it will not be in metadata it will be complicated to extract
-        # if self._check_toc(pages):
-        #     return self._extract_toc(pages)
-        else:
-            return None
         
     ## OCR based functions
     def _extract_ocr(self) -> tuple[list[dict[str, any]], None]:
-        pages = []
-        # paragraphs = []
-        # sentences = []
-
-        # try:
-        # Process PDF with OCR and get bytes directly
         ocr_pdf_bytes = self._process_pdf_with_ocr(self._document_path)
-
-        # Convert PDF bytes to images directly
-        images = convert_from_bytes(ocr_pdf_bytes)
+        doc = fitz.open(stream=ocr_pdf_bytes, filetype="pdf")
         
-        for page_num, img in enumerate(images, 1):
-            # Extract text from the current page
-            page_text = pytesseract.image_to_string(img)
-            # pages.append([page_num, page_text])
-
-            # Split into paragraphs
-            page_paragraphs = self._split_into_paragraphs(page_text)            
-            # paragraphs.append(page_paragraphs)
-
-            # page_sentences = []
-            # for paragraph_num, paragraph in enumerate(page_paragraphs):
-            #     paragraph_text = paragraph
-            #     paragraph_sentences = paragraph_text.split(".")
-            #     paragraph_sentence = []
-            #     for i, sentence in enumerate(paragraph_sentences):
-            #         if sentence.strip():  # Only add non-empty sentences
-            #             paragraph_sentence.append(sentence.strip())
-                # page_sentences.append(paragraph_sentence)
-            # sentences.append(page_sentences)
-
+        images = [
+            Image.frombytes("RGB", [pix.width, pix.height], pix.samples)
+            for page in doc
+            for pix in [page.get_pixmap(dpi=150)]
+        ]
+        toc = self._extract_toc(images)
+        
+        pages = []
+        for page_num, page in enumerate(doc, start=1):
+            blocks = page.get_text("blocks")
+            cleaned_blocks = [self._clean_whitespace(b[4]) for b in blocks]
+            page_text = " ".join(cleaned_blocks)
+            page_paragraphs = [t for t in cleaned_blocks if len(t) > 20]
             pages.append({
                 'page_num': page_num,
                 'text': page_text,
                 'paragraphs': page_paragraphs,
-                # 'sentences': page_sentences
             })
-
-        # except Exception as e:
-        return pages, None
+        doc.close()
+        
+        return pages, toc
 
     def _process_pdf_with_ocr(self, pdf_path: str) -> bytes:
         """Process PDF with OCR and return the bytes directly"""
         output_buffer = BytesIO()
         
         ocrmypdf.ocr(pdf_path, output_buffer,
-                    force_ocr=True, 
-                    skip_text=False,
+                    force_ocr=True,
                     deskew=True,
-                    clean=True)
+                    optimize=0,
+                    output_type='pdf',        # skip PDF/A generation
+                    fast_web_view=999999)     # skip fast web view optimization
         
         return output_buffer.getvalue()
     
+    ## USELESS
     def _split_into_paragraphs(self, text: str) -> list[str]:
         """ Split text into paragraphs with improved handling """
         raw_paragraphs = text.split('\n\n')

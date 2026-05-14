@@ -22,7 +22,7 @@ services:
       --pattern='*.py' 
       --recursive 
       -- 
-      celery -A src.main worker --loglevel=info -E --pool=solo --queues=evilflowers_text_worker
+      celery -A main worker --loglevel=info -E --pool=solo --queues=evilflowers_text_worker
     networks:
       - elk
       # - shared-redis

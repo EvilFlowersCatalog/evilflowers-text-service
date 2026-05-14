@@ -18,3 +18,7 @@ docker-compose.yml
 *.code-workspace
 
 data/
+
+# model
+*.pt
+.cache

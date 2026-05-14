@@ -59,6 +59,7 @@ def process_pdf_task(self: Task, source: str, entry_id: str):
     tables = text_service.extract_tables()
 
     pages, toc = text_results
+    print(toc)
 
     chunks = text_service.process_text(pages)
     

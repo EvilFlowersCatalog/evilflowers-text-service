@@ -31,5 +31,9 @@ requests
 # Testing only
 watchdog[watchmedo]
 
-#Milvus
-pymilvus
+# ToC
+numpy
+doclayout-yolo
+Pillow
+opencv-python-headless
+huggingface_hub

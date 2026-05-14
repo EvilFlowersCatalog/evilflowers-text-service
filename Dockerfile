@@ -8,6 +8,7 @@ RUN apt-get update && \
     build-essential \
     git \
     wget \
+    libgl1 \
     # Tesseract OCR + language data
     tesseract-ocr \
     tesseract-ocr-eng \
@@ -24,6 +25,7 @@ RUN apt-get update && \
 # Copy requirements and install Python dependencies
 COPY requirements.txt .
 RUN pip install --upgrade pip && \
+    pip install torch torchvision --index-url https://download.pytorch.org/whl/cpu && \
     pip install -r requirements.txt
 
 COPY src/ ./src/
