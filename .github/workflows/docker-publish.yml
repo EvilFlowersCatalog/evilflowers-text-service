@@ -12,7 +12,22 @@ env:
   IMAGE_NAME: ${{ github.repository }}
 
 jobs:
+  test:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+      # Unit tests cover the pure parts (geometry, parsing); they need no models.
+      - name: Run tests
+        run: |
+          pip install pytest pymupdf python-dotenv requests celery pillow
+          if [ -f requirements-test.txt ]; then pip install -r requirements-test.txt; fi
+          PYTHONPATH=src python -m pytest tests -q
+
   build-and-push:
+    needs: test
     runs-on: ubuntu-latest
     permissions:
       contents: read
@@ -46,4 +61,7 @@ jobs:
           context: .
           push: ${{ github.event_name != 'pull_request' }}
           tags: ${{ steps.meta.outputs.tags }}
-          labels: ${{ steps.meta.outputs.labels }} 
+          labels: ${{ steps.meta.outputs.labels }}
+          # Recorded in every extraction run's provenance (IP-018).
+          build-args: |
+            IMAGE_TAG=${{ github.ref_name }}@${{ github.sha }}

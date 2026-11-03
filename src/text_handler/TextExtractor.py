@@ -57,7 +57,9 @@ class TextExtractor:
             if toc is not None:
                 return toc
 
-        yolo = YOLOv10(Config.YOLO_MODEL_PATH)
+        yolo = self._load_yolo()
+        if yolo is None:
+            return None
 
         if isinstance(source, fitz.Document):
             pages_to_scan = range(min(20, source.page_count))
@@ -100,6 +102,23 @@ class TextExtractor:
                 return toc if toc else None
 
         return None
+
+    @staticmethod
+    def _load_yolo():
+        """The ToC layout model; fetched to the Hugging Face cache when the image does not carry it."""
+        path = Config.YOLO_MODEL_PATH
+        if not os.path.exists(path):
+            try:
+                from huggingface_hub import hf_hub_download
+
+                path = hf_hub_download(
+                    repo_id="juliozhao/DocLayout-YOLO-DocLayNet-Docsynth300K_pretrained",
+                    filename=os.path.basename(Config.YOLO_MODEL_PATH),
+                )
+            except Exception as error:
+                print(f"ToC layout model unavailable, skipping ToC detection: {error}")
+                return None
+        return YOLOv10(path)
 
     def _get_list_items(self, yolo, img) -> list:
         results = yolo.predict(source=img, imgsz=1120, conf=0.2, iou=0.5, agnostic_nms=True, verbose=False)

@@ -37,3 +37,7 @@ doclayout-yolo
 Pillow
 opencv-python-headless
 huggingface_hub
+
+# Paragraph index (IP-018 Phase 2b)
+sentence-transformers>=3.0
+numpy

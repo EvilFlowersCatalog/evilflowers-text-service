@@ -30,7 +30,16 @@ RUN pip install --upgrade pip && \
 
 COPY src/ ./src/
 
-ENV PYTHONPATH=/app/src:$PYTHONPATH
+ARG IMAGE_TAG=dev
+ENV PYTHONPATH=/app/src \
+    PYTHONUNBUFFERED=1 \
+    IMAGE_TAG=${IMAGE_TAG} \
+    HF_HOME=/models
 
-# Run the Celery worker
-CMD ["celery", "-A", "src.main", "worker", "--loglevel=info", "-E", "--pool=solo", "--queues=evilflowers_text_worker"]
+# Model weights live in a volume, not in the image (IP-018).
+VOLUME ["/models"]
+
+# Both queues by default. Compose runs a second container on the embed queue
+# alone (`--queues=evilflowers_text_embed`), so a reader's request never waits
+# behind a book being indexed.
+CMD ["celery", "--workdir", "src", "-A", "main", "worker", "--loglevel=info", "-E", "--pool=solo", "--queues=evilflowers_text_worker,evilflowers_text_embed"]

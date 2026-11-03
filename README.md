@@ -26,6 +26,25 @@ make run
 python src/main.py
 ```
 
+## Celery tasks
+
+| Task | Queue | Purpose |
+|---|---|---|
+| `evilflowers_text_worker.process_pdf` | `evilflowers_text_worker` | Chunk a PDF and index it in `search-service` (queued by the catalog on upload) |
+| `evilflowers_text_worker.delete_document` | `evilflowers_text_worker` | Remove a document from `search-service` |
+| `evilflowers_text_worker.tables` | `evilflowers_text_worker` | IP-018: table regions from the analyzer's layout pass, read with pdfplumber into markdown, cropped to WebP, kept with their position |
+| `evilflowers_text_worker.paragraphs` | `evilflowers_text_worker` | IP-018 Phase 2b: the paragraph index (paragraphs, sentence offsets and quads, section, one embedding each, `next` and `similar` links) |
+| `evilflowers_text_worker.embed_query` | `evilflowers_text_embed` | IP-018 Phase 6b: embed a reader's request for the catalog with the model of the run it searches |
+
+The IP-018 jobs are dispatched by `evilflowers-analyzer-service` and report to the catalog's
+`/extraction/v1/runs/{run_id}/...` ingestion API (`src/catalog.py`) with `CATALOG_API_KEY`, the API key
+of a catalog user holding `extraction.ingest_extraction`. Paragraph vectors go to the catalog
+(pgvector), not to a vector store of this service. `EMBEDDING_MODEL` defaults to Snowflake Arctic
+Embed M v2.0 (768 dimensions, the catalog's column); weights are cached in `HF_HOME` (`/models`).
+
+The image consumes both queues; in compose a second container runs
+`--queues=evilflowers_text_embed` alone so requests do not wait behind a book being indexed.
+
 ## Project Structure
 
 ```
