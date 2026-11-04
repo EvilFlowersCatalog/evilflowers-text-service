@@ -158,6 +158,14 @@ def paragraphs_task(run_id: str, source: str, **_):
     except RunNotRunning:
         logger.warning("Run %s is not accepting results", run_id)
         return
+    except Exception as error:
+        # Report it, or the run waits for this job forever.
+        logger.exception("Reporting paragraphs failed for run %s", run_id)
+        try:
+            catalog.job("paragraphs", failed=True, error=str(error))
+        except Exception:
+            logger.exception("Could not report the failed paragraphs job for run %s", run_id)
+        return
     logger.info("Run %s: %d paragraphs", run_id, len(rows))
 
 

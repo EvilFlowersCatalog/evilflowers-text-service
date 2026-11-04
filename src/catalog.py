@@ -60,7 +60,10 @@ class Catalog:
 
     def paragraphs(self, paragraphs: List[dict], links: List[dict]) -> None:
         """Paragraphs in batches; the links go with the last batch, once every paragraph exists."""
-        batches = [paragraphs[index : index + BATCH] for index in range(0, len(paragraphs), BATCH)] or [[]]
+        if not paragraphs:
+            # The catalog requires a non-empty list; a document without a text layer has none.
+            return
+        batches = [paragraphs[index : index + BATCH] for index in range(0, len(paragraphs), BATCH)]
         for number, batch in enumerate(batches, start=1):
             payload = {"paragraphs": batch}
             if number == len(batches):

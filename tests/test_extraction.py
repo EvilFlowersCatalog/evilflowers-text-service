@@ -70,3 +70,11 @@ def test_markdown_table():
         "| A | B |\n| --- | --- |\n| 1 |  |\n| x\\|y | 2 |"
     )
     assert tables.markdown([[None, ""]]) is None
+
+
+def test_no_paragraphs_posts_nothing(monkeypatch):
+    from catalog import Catalog
+
+    client = Catalog("run")
+    monkeypatch.setattr(client, "_post", lambda *args, **kwargs: pytest.fail("posted an empty batch"))
+    client.paragraphs([], [])
