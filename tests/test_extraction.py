@@ -78,3 +78,16 @@ def test_no_paragraphs_posts_nothing(monkeypatch):
     client = Catalog("run")
     monkeypatch.setattr(client, "_post", lambda *args, **kwargs: pytest.fail("posted an empty batch"))
     client.paragraphs([], [])
+
+
+def test_garbled_tables_get_no_markdown():
+    # The landscape Table 5.1 read sideways: letters scattered over cells.
+    garbled = [["", "", "", "a fo", ""], ["", "", "", "regan", "tc"], ["dnuo", "", "", "orgk", "t c"], ["rgk", "ro", "ro", "cab", "yt"], ["c", "od", "od", "me uf", ",y"]]
+    assert not tables.plausible(garbled)
+    real = [["Year", "Event"], ["1977", "Health Council report"], ["2014", "Ban on tobacco sales to minors"]]
+    assert tables.plausible(real)
+
+
+def test_rotated_text_is_detected():
+    assert tables.rotated_share([{"upright": False}] * 8 + [{"upright": True}] * 2) > tables.MAX_ROTATED_SHARE
+    assert tables.rotated_share([{"upright": True}] * 10) == 0
