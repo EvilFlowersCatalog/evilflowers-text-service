@@ -39,5 +39,9 @@ opencv-python-headless
 huggingface_hub
 
 # Paragraph index (IP-018 Phase 2b)
-sentence-transformers>=3.0
+sentence-transformers>=3.0,<6
+# Arctic Embed v2.0 runs custom code (trust_remote_code); transformers 5 leaves its
+# non-persistent buffers (position_ids, rotary inv_freq) uninitialized: garbage vectors
+# or an IndexError. Keep 4.x until the model code supports 5.
+transformers>=4.41,<5
 numpy
