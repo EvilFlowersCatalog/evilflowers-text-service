@@ -1,0 +1,37 @@
+# Local development: Redis and the two workers of this image. The catalog and the analyzer run from their own repos
+# and point at this Redis; STORAGE_PATH must be the same directory they read and write (./data here).
+#
+#   docker compose up --build
+#   docker compose exec text evilflowers-text download-models   # once, into the `models` volume
+
+x-worker: &worker
+  build: .
+  env_file:
+    - path: .env
+      required: false
+  environment:
+    REDIS_URL: redis://redis:6379/7
+    STORAGE_PATH: /mnt/data
+    LOG_FORMAT: text
+  volumes:
+    - ./data:/mnt/data
+    - models:/models
+  depends_on:
+    - redis
+
+services:
+  redis:
+    image: redis:7
+    ports:
+      - "6379:6379"
+
+  text:
+    <<: *worker
+    command: celery -A evilflowers_text.worker worker --loglevel=INFO -E --pool=solo --queues=evilflowers_text_worker
+
+  text-embed:
+    <<: *worker
+    command: celery -A evilflowers_text.worker worker --loglevel=INFO -E --pool=solo --queues=evilflowers_text_embed
+
+volumes:
+  models:

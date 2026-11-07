@@ -1,26 +1,21 @@
 .venv
 .DS_Store
 __pycache__
+.pytest_cache
+.ruff_cache
+dist/
 
-src/test_data/
 .env
-reqs.txt
-
-# Local search service for testing
-test_local_garbage
-semantic
-milvus_lite.db
-src/test.py
-
-# Dev
-docker-compose.override.yml
-docker-compose.yml
-*.code-workspace
-
 data/
 
-# model
+# Local overrides
+docker-compose.override.yml
+compose.override.yml
+*.code-workspace
+
+# Models
 *.pt
 .cache
+
 .mcp.json
 .idea/

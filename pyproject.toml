@@ -1,0 +1,99 @@
+[project]
+name = "evilflowers-text-service"
+version = "1.0.0"
+description = "Celery worker of the EvilFlowers catalog: PDF tables, paragraph index and embeddings (IP-018), search-service indexing"
+readme = "README.md"
+authors = [{ name = "Jakub Dubec", email = "jakub.dubec@stuba.sk" }]
+requires-python = ">=3.12,<3.13"
+dependencies = [
+    "celery[redis]>=5.6,<6",
+    "numpy>=2",
+    "pdfplumber>=0.11",
+    "pillow>=11",
+    "pydantic>=2.12,<3",
+    "pydantic-settings>=2.6,<3",
+    "pymupdf>=1.26",
+    "python-dotenv>=1.0",
+    "requests>=2.32",
+    # IP-019: code uses the API only, a no-op without the `otel` extra. One release train with the catalog.
+    "opentelemetry-api==1.45.2",
+]
+
+[project.optional-dependencies]
+# Paragraph and query embeddings (`paragraphs`, `embed_query`).
+embeddings = [
+    "sentence-transformers>=3.0,<6",
+    # Arctic Embed v2.0 runs custom code (trust_remote_code); transformers 5 leaves its non-persistent
+    # buffers (position_ids, rotary inv_freq) uninitialized: garbage vectors or an IndexError.
+    # Keep 4.x until the model code supports 5.
+    "transformers>=4.41,<5",
+    "torch>=2.4",
+]
+# The search-service pipeline (`process_pdf`): OCR, ToC layout model, chunking, whole-document tables.
+indexing = [
+    "doclayout-yolo>=0.0.4",
+    "huggingface-hub>=0.24",
+    "langdetect>=1.0.9",
+    "llama-index-core>=0.12",
+    "ocrmypdf>=16",
+    "opencv-python-headless>=4.10",
+    "pandas>=2.2",
+    "pytesseract>=0.3.13",
+    "torch>=2.4",
+    "torchvision>=0.19",
+]
+# OTLP/HTTP to the node's Alloy; SDK/exporter 1.x and contrib 0.yb0 move together (as in the catalog).
+otel = [
+    "opentelemetry-sdk==1.45.2",
+    "opentelemetry-exporter-otlp-proto-http==1.45.2",
+    "opentelemetry-instrumentation-celery==0.66b2",
+    "opentelemetry-instrumentation-requests==0.66b2",
+    "opentelemetry-instrumentation-system-metrics==0.66b2",
+]
+
+[project.scripts]
+evilflowers-text = "evilflowers_text.cli:main"
+
+[dependency-groups]
+# Unit tests need no models: `uv sync` installs the core and this group only.
+dev = [
+    "opentelemetry-sdk==1.45.2",
+    "pytest>=8.3",
+    "ruff>=0.14",
+    "watchdog[watchmedo]>=6",
+]
+
+[build-system]
+requires = ["hatchling>=1.27"]
+build-backend = "hatchling.build"
+
+[tool.hatch.build.targets.wheel]
+packages = ["src/evilflowers_text"]
+
+# CPU wheels of torch: the default index serves CUDA builds (gigabytes the image never uses).
+[tool.uv.sources]
+torch = [{ index = "pytorch-cpu" }]
+torchvision = [{ index = "pytorch-cpu" }]
+
+[[tool.uv.index]]
+name = "pytorch-cpu"
+url = "https://download.pytorch.org/whl/cpu"
+explicit = true
+
+[tool.pytest.ini_options]
+testpaths = ["tests"]
+addopts = "-ra"
+filterwarnings = ["ignore::DeprecationWarning:importlib._bootstrap"]
+
+[tool.ruff]
+line-length = 119
+target-version = "py312"
+src = ["src", "tests"]
+
+[tool.ruff.lint]
+select = ["E", "F", "W", "I", "UP", "B", "SIM", "RUF", "LOG", "G"]
+# Typographic quotes in the sentence-splitting patterns are intended.
+ignore = ["RUF001", "RUF002", "RUF003"]
+
+[tool.ruff.lint.isort]
+known-first-party = ["evilflowers_text"]
