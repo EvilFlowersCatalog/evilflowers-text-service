@@ -1,11 +1,39 @@
+# Text service image: test, build and push to GHCR; deploy `develop` to the dev environment.
+#
+#   push to develop  → test, push :develop :sha-<short>, deploy to k3s ns evilflowers-dev
+#   push to main     → test, push :main :sha-<short>              (no deploy)
+#   tag v*.*.*       → test, push :<version> :sha-<short>         (no deploy)
+#   pull request     → test, build (no push)
+#   manual           → as a push of the chosen ref
+#
+# Deploy (contract: knowledge base, Cookbooks/Deploy-a-Service §4 and CI-Runner): the dev
+# Deployments `text` and `text-embed` both run this image on a floating tag with
+# imagePullPolicy Always, so a new image goes live with a rollout restart. The `deploy` job
+# runs on the self-hosted runner INSIDE k3s (runs-on: elvira-k3s), whose ServiceAccount may
+# restart Deployments only in the namespaces of `github_runner_deploy_namespaces`
+# (roles/github_runner). It then checks that the running pods use the digest just pushed.
+#
+# Prerequisites outside this repo (one time): this repo in the runner group `elvira-k3s`,
+# `evilflowers-dev` in `github_runner_deploy_namespaces`, and the dev instance pinned to
+# `evilflowers-text-service:develop` (group_vars/all/evilflowers.yml). Until the last one,
+# the digest check fails on purpose: the pods would still be running :main.
+
 name: Docker Build and Push
 
 on:
   push:
-    branches: [ "main" ]
+    branches: [ "main", "develop" ]
     tags: [ 'v*.*.*' ]
   pull_request:
-    branches: [ "main" ]
+    branches: [ "main", "develop" ]
+  workflow_dispatch:
+
+# Concurrency is per job, not per workflow: a newer push to the same ref cancels the older
+# test/build, while `deploy` has its own group that never cancels, so a rollout in progress
+# always finishes (a workflow-level group would cancel it too).
+
+permissions:
+  contents: read
 
 env:
   REGISTRY: ghcr.io
@@ -14,30 +42,39 @@ env:
 jobs:
   test:
     runs-on: ubuntu-latest
+    concurrency:
+      group: text-test-${{ github.ref }}
+      cancel-in-progress: true
     steps:
       - uses: actions/checkout@v4
       - uses: actions/setup-python@v5
         with:
           python-version: "3.12"
-      # Unit tests cover the pure parts (geometry, parsing); they need no models.
+      # Unit tests cover the pure parts (geometry, parsing, telemetry); they need no models.
       - name: Run tests
         run: |
-          pip install pytest pymupdf python-dotenv requests celery pillow
+          pip install pytest pymupdf python-dotenv requests celery pillow opentelemetry-api opentelemetry-sdk
           if [ -f requirements-test.txt ]; then pip install -r requirements-test.txt; fi
           PYTHONPATH=src python -m pytest tests -q
 
   build-and-push:
     needs: test
     runs-on: ubuntu-latest
+    concurrency:
+      group: text-build-${{ github.ref }}
+      cancel-in-progress: true
     permissions:
       contents: read
       packages: write
+    outputs:
+      digest: ${{ steps.build.outputs.digest }}
 
     steps:
       - name: Checkout repository
         uses: actions/checkout@v4
 
       - name: Log in to the Container registry
+        if: github.event_name != 'pull_request'
         uses: docker/login-action@v3
         with:
           registry: ${{ env.REGISTRY }}
@@ -56,12 +93,106 @@ jobs:
             type=sha
 
       - name: Build and push Docker image
+        id: build
         uses: docker/build-push-action@v5
         with:
           context: .
           push: ${{ github.event_name != 'pull_request' }}
           tags: ${{ steps.meta.outputs.tags }}
           labels: ${{ steps.meta.outputs.labels }}
-          # Recorded in every extraction run's provenance (IP-018).
+          # Recorded in every extraction run's provenance (IP-018) and as the
+          # OpenTelemetry service.version of the workers.
           build-args: |
             IMAGE_TAG=${{ github.ref_name }}@${{ github.sha }}
+
+      - name: Summary
+        if: github.event_name != 'pull_request'
+        run: |
+          {
+            echo "### Image"
+            echo
+            echo '```'
+            echo "${{ steps.meta.outputs.tags }}"
+            echo "digest: ${{ steps.build.outputs.digest }}"
+            echo '```'
+          } >> "$GITHUB_STEP_SUMMARY"
+
+  deploy:
+    needs: build-and-push
+    if: github.event_name != 'pull_request' && github.ref == 'refs/heads/develop'
+    runs-on: elvira-k3s            # ARC scale set in k3s (knowledge: roles/github_runner)
+    environment:
+      name: development
+    concurrency:
+      group: deploy-text-evilflowers-dev
+      cancel-in-progress: false
+    permissions: {}
+    env:
+      NAMESPACE: evilflowers-dev
+      # Both run this image: `text` (extraction queue) and `text-embed` (readers' queries).
+      DEPLOYMENTS: text text-embed
+      DIGEST: ${{ needs.build-and-push.outputs.digest }}
+      KUBECTL_VERSION: v1.31.5     # = the cluster (k3s v1.31.5+k3s1)
+      KUBECTL_SHA256: fbecbfd375b3686002c2e81d51c390172f5ffba3d6b47920d55342cb03f557af   # dl.k8s.io …/linux/amd64/kubectl.sha256
+    steps:
+      # The runner image has no kubectl. The pod is deleted after the job, so nothing is cached.
+      - name: kubectl ${{ env.KUBECTL_VERSION }} (checksum-pinned)
+        run: |
+          curl -fsSLo "$RUNNER_TEMP/kubectl" "https://dl.k8s.io/release/${KUBECTL_VERSION}/bin/linux/amd64/kubectl"
+          echo "${KUBECTL_SHA256}  $RUNNER_TEMP/kubectl" | sha256sum -c -
+          chmod +x "$RUNNER_TEMP/kubectl"
+          echo "$RUNNER_TEMP" >> "$GITHUB_PATH"
+
+      # In-cluster credentials: the pod's ServiceAccount arc-deployer.
+      - name: Restart onto the new :develop
+        run: |
+          for deployment in $DEPLOYMENTS; do
+            kubectl -n "$NAMESPACE" rollout restart "deployment/$deployment"
+          done
+
+      # Strategy Recreate and no probes (Celery workers have no port): `rollout status` returns
+      # once the new pod is Running. The image carries torch, so a cold pull takes minutes.
+      - name: Wait for the rollouts
+        run: |
+          for deployment in $DEPLOYMENTS; do
+            kubectl -n "$NAMESPACE" rollout status "deployment/$deployment" --timeout=600s
+          done
+
+      # :develop could have moved (a newer push built while this rolled out), or the pull could
+      # have failed silently onto a cached layer. Pods still terminating are skipped.
+      - name: Running pods use ${{ env.DIGEST }}
+        run: |
+          failed=0
+          for deployment in $DEPLOYMENTS; do
+            ids=$(kubectl -n "$NAMESPACE" get pods -l "app.kubernetes.io/name=$deployment" \
+              -o go-template='{{range .items}}{{if not .metadata.deletionTimestamp}}{{range .status.containerStatuses}}{{.imageID}}{{"\n"}}{{end}}{{end}}{{end}}')
+            echo "$deployment:"
+            echo "$ids"
+            if [ -z "$ids" ]; then
+              echo "::error::no running pod of $deployment"
+              failed=1
+            elif echo "$ids" | grep -v -- "@${DIGEST}\$"; then
+              echo "::error::a running pod of $deployment does not use ${DIGEST}"
+              failed=1
+            fi
+          done
+          exit "$failed"
+
+      - name: Summary
+        if: always()
+        run: |
+          {
+            echo "### Deploy to ${NAMESPACE}: ${{ job.status }}"
+            echo
+            echo "Digest \`${DIGEST}\`, commit \`${GITHUB_SHA::7}\`."
+            echo
+            echo '```'
+            kubectl -n "$NAMESPACE" get pods -o wide \
+              -l 'app.kubernetes.io/name in (text,text-embed)' 2>&1 || true
+            echo '```'
+            echo
+            echo "Grafana (VPN): http://grafana.observability.stu.k8s.internal → Explore"
+            echo "- Tempo: \`{resource.service.name=~\"text|text-embed\" && resource.deployment.environment.name=\"development\"}\`"
+            echo "- Loki: \`{namespace=\"${NAMESPACE}\", service_name=~\"text|text-embed\"} | json\`"
+            echo "- Mimir: \`text_task_duration_seconds_bucket\`, \`text_embedding_duration_seconds_bucket\`, \`text_job_outcome_total\`"
+          } >> "$GITHUB_STEP_SUMMARY"

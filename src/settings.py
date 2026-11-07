@@ -19,6 +19,8 @@ CATALOG_API_URL = os.getenv("CATALOG_API_URL", "http://catalog:8000")
 #: API key (bearer JWT) of the catalog user holding `extraction.ingest_extraction`.
 CATALOG_API_KEY = os.getenv("CATALOG_API_KEY")
 IMAGE_TAG = os.getenv("IMAGE_TAG", "dev")
+#: `json` (one object per line, what Loki parses) or `text` (Celery's own format, for a terminal).
+LOG_FORMAT = os.getenv("LOG_FORMAT", "json").strip().lower()
 
 CROP_DPI = int(os.getenv("CROP_DPI", "144"))
 WEBP_QUALITY = int(os.getenv("WEBP_QUALITY", "82"))

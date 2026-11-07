@@ -22,3 +22,5 @@ data/
 # model
 *.pt
 .cache
+.mcp.json
+.idea/

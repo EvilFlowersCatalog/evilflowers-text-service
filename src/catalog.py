@@ -12,6 +12,7 @@ from typing import Iterable, List, Optional
 import requests
 
 import settings
+import telemetry
 
 logger = logging.getLogger(__name__)
 
@@ -38,6 +39,7 @@ class Catalog:
                 if attempt == attempts:
                     raise
                 logger.warning("Catalog unreachable at %s%s, retrying", self.base, path)
+                telemetry.record_catalog_retry(path, "unreachable")
             else:
                 if response.status_code == 409:
                     raise RunNotRunning(response.text)
@@ -45,6 +47,7 @@ class Catalog:
                     response.raise_for_status()
                     return response.json() if response.content else {}
                 logger.warning("Catalog answered %s on %s, retrying", response.status_code, path)
+                telemetry.record_catalog_retry(path, str(response.status_code))
             time.sleep(2**attempt)
         return {}
 
