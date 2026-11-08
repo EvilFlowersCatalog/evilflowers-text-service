@@ -42,8 +42,6 @@ RUN apt-get update && \
 
 WORKDIR /app
 COPY --from=build /app/.venv /app/.venv
-# Deprecated `celery --workdir src -A main` entry point, for manifests that still override the command.
-COPY src/main.py ./src/main.py
 
 ARG IMAGE_TAG=dev
 ENV PATH=/app/.venv/bin:$PATH \
