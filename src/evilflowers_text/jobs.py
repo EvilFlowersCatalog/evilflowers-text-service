@@ -132,7 +132,7 @@ class ParagraphsJob(ExtractionJob[tuple[list[Paragraph], list[ParagraphLink]]]):
     @property
     def encoder(self) -> Encoder:
         if self._encoder is None:
-            self._encoder = embeddings.encoder(self.settings.embedding_model)
+            self._encoder = embeddings.encoder()
         return self._encoder
 
     def extract(self) -> tuple[list[Paragraph], list[ParagraphLink]]:
@@ -153,8 +153,14 @@ class ParagraphsJob(ExtractionJob[tuple[list[Paragraph], list[ParagraphLink]]]):
         self.catalog.paragraphs(*result)
 
     def provenance(self) -> dict[str, Any]:
-        # The catalog embeds a reader's query with this model (`ReaderExtraction.embedding_model`).
-        return {**super().provenance(), "embedding_model": self.settings.embedding_model}
+        # `model_id@model_sha`: the catalog never compares vectors of two models.
+        try:
+            model = self.encoder.name
+        except Exception:
+            # Also called to report a failure, often because tei-embed is down: that report must still go out.
+            logger.warning("Embedding model unknown for run %s", self.run_id, exc_info=True)
+            return super().provenance()
+        return {**super().provenance(), "embedding_model": model}
 
     def done(self, result: tuple[list[Paragraph], list[ParagraphLink]]) -> None:
         rows, links = result
