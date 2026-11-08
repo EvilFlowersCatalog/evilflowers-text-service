@@ -10,8 +10,9 @@ from typing import Any, Literal
 
 from pydantic import BaseModel, ConfigDict, Field, field_validator
 
-#: Dimension of the catalog's vector column (`apps.extraction.models.EMBEDDING_DIMENSIONS`).
-EMBEDDING_DIMENSIONS = 768
+#: Dimension of the catalog's `halfvec` column (`apps.extraction.models.EMBEDDING_DIMENSIONS`):
+#: multilingual-e5-large-instruct, as served by tei-embed.
+EMBEDDING_DIMENSIONS = 1024
 #: The catalog keeps this much of a failed job's error.
 MAX_ERROR_LENGTH = 2000
 

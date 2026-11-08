@@ -56,12 +56,9 @@ class Instrument:
 TASK_DURATION = Instrument("histogram", "text.task.duration", "s", "Celery task run time")
 JOB_OUTCOME = Instrument("counter", "text.job.outcome", "{job}", "IP-018 jobs reported to the catalog, by outcome")
 EMBEDDING_DURATION = Instrument(
-    "histogram", "text.embedding.duration", "s", "Time to embed one batch (documents) or one query"
+    "histogram", "text.embedding.duration", "s", "Time to embed one batch of paragraphs through tei-embed"
 )
 EMBEDDING_INPUTS = Instrument("counter", "text.embedding.inputs", "{text}", "Texts embedded")
-MODEL_LOAD = Instrument(
-    "histogram", "text.embedding.model_load.duration", "s", "Embedding model load time (once per process)"
-)
 PARAGRAPHS = Instrument(
     "histogram", "text.document.paragraphs", "{paragraph}", "Paragraphs indexed per document", COUNT_BUCKETS
 )
@@ -79,7 +76,7 @@ def record_job(job: str, outcome: str) -> None:
 
 
 def record_embedding(kind: str, model: str, inputs: int, seconds: float) -> None:
-    """``kind``: documents (paragraph batches) or query (a reader's request)."""
+    """``kind``: documents (paragraph batches)."""
     attributes = {"kind": kind, "model": model}
     EMBEDDING_DURATION.record(seconds, attributes)
     EMBEDDING_INPUTS.add(inputs, attributes)

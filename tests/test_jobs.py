@@ -35,13 +35,21 @@ class FakeCatalog:
 
 
 class FakeEncoder:
-    name = "fake/model"
+    name = "fake/model@abc123"
 
     def documents(self, texts):
         return [[1.0] + [0.0] * (EMBEDDING_DIMENSIONS - 1) for _ in texts]
 
-    def query(self, text):
-        return [0.0] * EMBEDDING_DIMENSIONS
+
+class DownEncoder:
+    """tei-embed unreachable: both the embedding and `/info` fail."""
+
+    @property
+    def name(self):
+        raise ConnectionError("tei-embed down")
+
+    def documents(self, texts):
+        raise ConnectionError("tei-embed down")
 
 
 @pytest.fixture
@@ -63,8 +71,17 @@ def test_paragraphs_job_posts_paragraphs_then_reports_done(settings, stored_book
     assert name == "paragraphs" and len(rows) == 4 and all(len(row.embedding) == EMBEDDING_DIMENSIONS for row in rows)
     assert {link.kind for link in links} == {"next", "similar"}
     assert report.status == "done"
-    # The catalog's reader embeds queries with this model.
-    assert report.provenance == {"image": "test", "embedding_model": settings.embedding_model}
+    # model@revision from TEI's /info: the catalog never compares vectors of two models.
+    assert report.provenance == {"image": "test", "embedding_model": "fake/model@abc123"}
+
+
+def test_unreachable_tei_is_still_reported_as_failed(settings, stored_book):
+    catalog = FakeCatalog()
+    job = ParagraphsJob("run-1", stored_book, settings=settings, catalog=catalog, encoder=DownEncoder())
+    assert job.run() == "failed"
+    [(name, report)] = catalog.reports()
+    assert name == "paragraphs" and report.status == "failed" and "tei-embed down" in report.error
+    assert report.provenance == {"image": "test"}
 
 
 def test_unreadable_pdf_reports_failed(settings):

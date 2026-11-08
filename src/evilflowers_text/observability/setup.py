@@ -13,9 +13,10 @@ What is instrumented once the providers are up:
 
 - every task (CONSUMER span; continues the producer's trace when the caller,
   catalog or analyzer, propagates the context in the task headers);
-- every ``requests`` call (catalog ingestion API, search-service): CLIENT spans
-  carrying ``traceparent``, so the catalog's Django span joins the same trace;
-- process metrics (CPU, resident memory: what a loaded embedding model costs).
+- every ``requests`` call (catalog ingestion API, tei-embed): CLIENT spans
+  carrying ``traceparent``, so the catalog's Django span and TEI's ``embed`` span
+  join the same trace;
+- process metrics (CPU, resident memory).
 
 Redis is deliberately not instrumented: the Celery broker polls it constantly
 and every poll would become a root trace.
@@ -149,7 +150,6 @@ def build_resource():
         "service.namespace": "elvira",
         "service.version": settings.image_tag,
         "service.instance.id": f"{socket.gethostname()}-{os.getpid()}",
-        "evilflowers.text.embedding_model": settings.embedding_model,
     }
     return Resource.create({key: value for key, value in defaults.items() if key not in from_environment})
 

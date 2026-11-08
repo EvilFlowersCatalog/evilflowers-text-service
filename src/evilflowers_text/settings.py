@@ -19,16 +19,11 @@ class Settings(BaseSettings):
 
     # -- Celery -------------------------------------------------------------------
     redis_url: str = "redis://redis:6379/0"
-    #: Extraction and indexing jobs.
+    #: The extraction jobs.
     queue: str = Field("evilflowers_text_worker", validation_alias=AliasChoices("TEXT_QUEUE", "QUEUE"))
-    #: Request embeddings for the catalog's reader; a separate worker so a reader
-    #: never waits behind a book being extracted.
-    embed_queue: str = "evilflowers_text_embed"
     #: Seconds before Redis redelivers an unacknowledged message. The extraction jobs
     #: acknowledge late, so this must outlast the longest book (about 30 minutes).
     broker_visibility_timeout: int = 7200
-    #: Seconds a task result (an `embed_query` vector) stays in Redis.
-    result_expires: int = 3600
 
     # -- Storage and provenance -----------------------------------------------------
     #: The catalog's storage root: originals are read here, crops written.
@@ -53,29 +48,28 @@ class Settings(BaseSettings):
     crop_dpi: int = 144
     webp_quality: int = 82
 
+    # -- Embeddings: the shared tei-embed (knowledge base, Cookbooks/Shared-Inference) ----------
+    #: In k8s the Service; from Compose on gateway `http://192.168.122.227:8081` with `TEI_HOST`.
+    #: The served model (multilingual-e5-large-instruct, 1024 dims) is TEI's, read from `/info`;
+    #: a different model or revision is a new pipeline version in the catalog.
+    tei_url: str = "http://tei-embed.shared.svc.cluster.local"
+    #: Bearer key, 1Password `ELVIRA/stu.inference.tei/api_key`.
+    tei_api_key: SecretStr | None = None
+    #: `Host` header for the gateway route (`embed.elvira.internal`); unset in k8s.
+    tei_host: str | None = None
+    #: Inputs per request; TEI's `max_client_batch_size` caps it too.
+    tei_batch_size: int = 32
+    #: Seconds per request (one batch).
+    tei_timeout: float = 60.0
+    #: The first try plus three retries on 429/503 and connection errors.
+    tei_attempts: int = 4
+
     # -- Paragraph index (IP-018 Phase 2b) ------------------------------------------------
-    #: Any sentence-transformers model of the catalog's vector dimension (768). Changing it
-    #: bumps the catalog's pipeline version.
-    embedding_model: str = "Snowflake/snowflake-arctic-embed-m-v2.0"
-    embedding_device: str = "cpu"
-    embedding_batch_size: int = 16
     #: Paragraphs shorter than this many words are not indexed (tp2025 `MIN_PARAGRAPH_LENGTH`).
     min_paragraph_words: int = 10
     #: `similar` links per paragraph, and the cosine floor below which none is made.
     similar_links_k: int = 5
     similar_min_score: float = 0.6
-
-    # -- Search-service indexing (`process_pdf`) ----------------------------------------------
-    search_service_url: str = "http://localhost:8001"
-    chunk_size: int = 768
-    chunk_overlap: int = 50
-    #: Table extractor of the indexing pipeline: `PdfPlumber` or `Camelot`.
-    table_extractor: str = "PdfPlumber"
-    table_extractor_mode: str = "lattice"
-    #: DocLayout-YOLO weights for ToC detection; fetched into the Hugging Face cache when absent.
-    yolo_model_path: Path | None = None
-    yolo_repo_id: str = "juliozhao/DocLayout-YOLO-DocLayNet-Docsynth300K_pretrained"
-    yolo_filename: str = "doclayout_yolo_doclaynet_imgsz1120_docsynth_pretrain.pt"
 
     def source_path(self, source: str) -> Path:
         """Absolute path of a file the catalog names relative to its storage root."""

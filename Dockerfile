@@ -16,7 +16,7 @@ ENV UV_COMPILE_BYTECODE=1 \
 
 WORKDIR /app
 
-# Dependencies first (cached while only the code changes); torch comes from the CPU index (pyproject.toml).
+# Dependencies first (cached while only the code changes).
 RUN --mount=type=cache,target=/root/.cache/uv \
     --mount=type=bind,source=uv.lock,target=uv.lock \
     --mount=type=bind,source=pyproject.toml,target=pyproject.toml \
@@ -30,29 +30,14 @@ RUN --mount=type=cache,target=/root/.cache/uv \
 # -- runtime -----------------------------------------------------------------------------------------------------------
 FROM python:3.12-slim
 
-# OCR of scans (ocrmypdf: Tesseract, Ghostscript) and OpenCV's runtime for the ToC layout model.
-RUN apt-get update && \
-    apt-get install -y --no-install-recommends \
-        tesseract-ocr \
-        tesseract-ocr-eng \
-        ghostscript \
-        libgl1 \
-        libglib2.0-0 && \
-    rm -rf /var/lib/apt/lists/*
-
 WORKDIR /app
 COPY --from=build /app/.venv /app/.venv
 
 ARG IMAGE_TAG=dev
 ENV PATH=/app/.venv/bin:$PATH \
     PYTHONUNBUFFERED=1 \
-    IMAGE_TAG=${IMAGE_TAG} \
-    HF_HOME=/models
+    IMAGE_TAG=${IMAGE_TAG}
 
-# Model weights live in a volume, not in the image (IP-018). `evilflowers-text download-models` prefetches them.
-VOLUME ["/models"]
-
-# Both queues by default. The `text-embed` deployment consumes `--queues=evilflowers_text_embed` alone,
-# so a reader's request never waits behind a book being indexed.
+# No model in the image or the process: paragraphs are embedded by the shared tei-embed (TEI_URL).
 CMD ["celery", "-A", "evilflowers_text.worker", "worker", "--loglevel=INFO", "-E", "--pool=solo", \
-     "--queues=evilflowers_text_worker,evilflowers_text_embed"]
+     "--queues=evilflowers_text_worker"]
