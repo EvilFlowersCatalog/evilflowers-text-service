@@ -58,12 +58,13 @@ src/evilflowers_text/
 ├── tasks/             thin Celery adapters for the extraction jobs
 ├── extraction/        paragraphs, tables, page geometry and crops
 ├── clients/           catalog ingestion API, shared HTTP session
-└── observability/     OpenTelemetry setup, spans, metrics, JSON logs, Celery signal wiring
+└── observability/     OpenTelemetry setup, spans, metrics, JSON logs, Pyroscope profiling, Celery signal wiring
 ```
 
 ## Development
 
-The project uses [uv](https://docs.astral.sh/uv/) and Python 3.12. The `otel` extra adds the OpenTelemetry SDK.
+The project uses [uv](https://docs.astral.sh/uv/) and Python 3.12. The `otel` extra adds the OpenTelemetry SDK, the
+`profiling` extra the Pyroscope SDK.
 
 ```bash
 make install        # core + dev tools (ruff, pytest): enough for the tests
@@ -109,6 +110,11 @@ The service follows the cluster's telemetry contract (knowledge base, `Cookbooks
   - process CPU and memory
 - **Logs.** Each log line is one JSON object on stdout, carrying `level`, `trace_id`/`span_id`, `task_name`/`task_id`,
   and the task's `run_id`, `job`, `entry_id` and `source`.
+- **Profiles** (Pyroscope). The node's eBPF profiler cannot unwind Python on k3s `control`, so the worker profiles
+  itself with the Pyroscope SDK (the `profiling` extra) when `PYROSCOPE_SERVER_ADDRESS` is set:
+  `PYROSCOPE_APPLICATION_NAME` (`text`) and `PYROSCOPE_TAGS` (`k=v` pairs separated by commas). It runs in the
+  process that runs the tasks, and each trace's root span links to its profile. Query
+  `{service_name="text", namespace="evilflowers-dev"}`.
 
 Queries:
 

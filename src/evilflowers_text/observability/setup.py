@@ -7,7 +7,9 @@ The contract is the cluster's (knowledge base, Cookbooks/Deploy-a-Service §3):
   when only ``HOST_IP`` is set, the endpoint is derived from it. With neither,
   telemetry stays off and the worker behaves as if this package did not exist;
 - traces and metrics go over OTLP/HTTP to the node's Alloy agent;
-- logs are NOT exported over OTLP: Alloy tails stdout (see ``logs``).
+- logs are NOT exported over OTLP: Alloy tails stdout (see ``logs``);
+- CPU profiles go to Pyroscope through its SDK when ``PYROSCOPE_SERVER_ADDRESS``
+  is set (see ``profiling``), independently of the OTLP endpoint.
 
 What is instrumented once the providers are up:
 
@@ -27,6 +29,7 @@ import os
 import socket
 import threading
 
+from evilflowers_text.observability import profiling
 from evilflowers_text.observability.otel import OTEL_AVAILABLE, metrics, trace
 from evilflowers_text.settings import get_settings
 
@@ -87,6 +90,9 @@ def setup() -> bool:
             return _state["enabled"]
         _state["done"] = True
 
+        # Independent of OTLP: profiles go straight to Pyroscope, whether or not traces are on.
+        profiling.setup()
+
         if not OTEL_AVAILABLE or os.environ.get("OTEL_SDK_DISABLED", "").strip().lower() == "true":
             return False
         target = endpoint()
@@ -120,6 +126,9 @@ def _configure() -> None:
     resource = build_resource()
 
     tracer_provider = TracerProvider(resource=resource)
+    # Tags each root span with its profile id, so Tempo links a trace to its CPU profile.
+    if (profile_processor := profiling.span_processor()) is not None:
+        tracer_provider.add_span_processor(profile_processor)
     tracer_provider.add_span_processor(BatchSpanProcessor(OTLPSpanExporter()))
     trace.set_tracer_provider(tracer_provider)
 
@@ -163,3 +172,4 @@ def shutdown(*_args, **_kwargs) -> None:
             provider.shutdown()
         except Exception:  # pragma: no cover
             logger.debug("OpenTelemetry provider shutdown failed", exc_info=True)
+    profiling.shutdown()
