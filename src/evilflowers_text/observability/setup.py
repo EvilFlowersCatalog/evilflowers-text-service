@@ -15,9 +15,12 @@ What is instrumented once the providers are up:
 
 - every task (CONSUMER span; continues the producer's trace when the caller,
   catalog or analyzer, propagates the context in the task headers);
-- every ``requests`` call (catalog ingestion API, tei-embed): CLIENT spans
-  carrying ``traceparent``, so the catalog's Django span and TEI's ``embed`` span
-  join the same trace;
+- every ``requests`` call to the catalog ingestion API (and tei-embed's ``/info``):
+  CLIENT spans carrying ``traceparent``, so the catalog's Django span joins the
+  same trace. The tei-embed batches are not traced one by one (``untraced_http``):
+  their ``embeddings.documents`` span carries the totals, and TEI's own spans are
+  root traces of their own (issue #10: hundreds of batches per book overflowed
+  Tempo's per-trace limit);
 - process metrics (CPU, resident memory).
 
 Redis is deliberately not instrumented: the Celery broker polls it constantly

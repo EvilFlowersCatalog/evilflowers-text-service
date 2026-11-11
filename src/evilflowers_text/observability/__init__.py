@@ -7,7 +7,7 @@ from evilflowers_text.observability import metrics
 from evilflowers_text.observability.context import bind
 from evilflowers_text.observability.logs import JsonFormatter
 from evilflowers_text.observability.setup import endpoint, is_enabled, setup, shutdown
-from evilflowers_text.observability.tracing import annotate, fail, span
+from evilflowers_text.observability.tracing import annotate, fail, span, untraced_http
 
 __all__ = [
     "JsonFormatter",
@@ -20,4 +20,5 @@ __all__ = [
     "setup",
     "shutdown",
     "span",
+    "untraced_http",
 ]

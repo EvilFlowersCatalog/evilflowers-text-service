@@ -169,6 +169,72 @@ def test_host_header_only_when_configured(tei_settings):
     assert http.headers["Host"] == "embed.elvira.internal"
 
 
+@pytest.fixture
+def spans(monkeypatch):
+    """Spans `observability.span` creates, finished, through an in-memory exporter."""
+    sdk = pytest.importorskip("opentelemetry.sdk.trace")
+    from opentelemetry.sdk.trace.export import SimpleSpanProcessor
+    from opentelemetry.sdk.trace.export.in_memory_span_exporter import InMemorySpanExporter
+
+    from evilflowers_text.observability import tracing
+
+    exporter = InMemorySpanExporter()
+    provider = sdk.TracerProvider()
+    provider.add_span_processor(SimpleSpanProcessor(exporter))
+    monkeypatch.setattr(tracing.trace, "get_tracer", lambda *_args, **_kwargs: provider.get_tracer("test"))
+    return exporter
+
+
+def test_one_span_per_call_not_per_batch(tei_settings, spans):
+    http = FakeTei()
+    encoder = TeiEncoder(settings=tei_settings, http=http)
+    encoder.info  # noqa: B018 - read /info first, so the 503 below hits a batch
+    http.failures.append(503)
+    encoder.documents([f"paragraph number {index}" for index in range(7)])
+    [only] = spans.get_finished_spans()
+    assert only.name == "embeddings.documents"
+    assert only.attributes["embedding.texts"] == 7
+    assert only.attributes["embedding.inputs"] == 7
+    assert only.attributes["embedding.batches"] == 3
+    assert only.attributes["embedding.batch_size"] == 3
+    assert only.attributes["tei.retries"] == 1
+    assert only.attributes["tei.max_batch_ms"] >= 0
+    assert only.attributes["embedding.model"] == encoder.name
+
+
+def test_a_failed_call_still_reports_its_tally(tei_settings, spans):
+    http = FakeTei()
+    encoder = TeiEncoder(settings=tei_settings, http=http)
+    encoder.info  # noqa: B018
+    http.failures.extend([503, 413])
+    with pytest.raises(requests.HTTPError):
+        encoder.documents(["text"])
+    [only] = spans.get_finished_spans()
+    assert only.attributes["tei.retries"] == 1
+    assert only.attributes["embedding.batches"] == 0
+    assert not only.status.is_ok
+
+
+def test_batch_requests_are_not_traced(tei_settings):
+    utils = pytest.importorskip("opentelemetry.instrumentation.utils")
+    traced: list[tuple[str, bool]] = []
+
+    class Watching(FakeTei):
+        def request(self, method, url, json=None, timeout=None):
+            traced.append((url.removeprefix("http://tei"), utils.is_http_instrumentation_enabled()))
+            return super().request(method, url, json=json, timeout=timeout)
+
+    TeiEncoder(settings=tei_settings, http=Watching()).documents(["one", "two", "three", "four"])
+    assert traced == [
+        ("/info", True),
+        ("/tokenize", False),
+        ("/tokenize", False),
+        ("/embed", False),
+        ("/embed", False),
+    ]
+    assert utils.is_http_instrumentation_enabled()
+
+
 def test_no_texts_no_requests(tei_settings):
     http = FakeTei()
     assert TeiEncoder(settings=tei_settings, http=http).documents([]) == []

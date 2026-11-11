@@ -13,13 +13,18 @@ The client contract is the knowledge base's (`Proposals/Search-Embeddings`,
   concurrency limit) and on connection errors;
 - the model's identity (`model_id@model_sha` from `/info`) travels with the vectors.
 
+Tracing: one `embeddings.documents` span per call, with the batch count, retries and
+slowest batch as attributes; the requests inside it are not traced (a book is hundreds of
+batches, and per-batch spans pushed one task past Tempo's per-trace limit, issue #10).
+Per-batch timings are the `text.embedding.duration` histogram.
+
 Callers depend on the `Encoder` protocol; the jobs never see HTTP.
 """
 
 import logging
 import time
 from collections.abc import Iterator, Sequence
-from contextlib import contextmanager
+from dataclasses import dataclass
 from typing import Any, Protocol
 
 import numpy as np
@@ -28,7 +33,7 @@ import requests
 from evilflowers_text.clients.catalog import batches
 from evilflowers_text.clients.http import session
 from evilflowers_text.extraction.paragraphs import sentences
-from evilflowers_text.observability import metrics, span
+from evilflowers_text.observability import annotate, metrics, span, untraced_http
 from evilflowers_text.settings import Settings, get_settings
 
 logger = logging.getLogger(__name__)
@@ -48,13 +53,22 @@ class Encoder(Protocol):
     def documents(self, texts: Sequence[str]) -> list[Vector]: ...
 
 
-@contextmanager
-def _measured(kind: str, model: str, inputs: int, **attributes) -> Iterator[None]:
-    """Span `embeddings.<kind>` plus the duration and input-count metrics."""
-    started = time.perf_counter()
-    with span(f"embeddings.{kind}", **{"embedding.model": model, "embedding.inputs": inputs, **attributes}):
-        yield
-    metrics.record_embedding(kind, model, inputs, time.perf_counter() - started)
+@dataclass
+class _Tally:
+    """One `documents()` call, for its span: a book is hundreds of batches, so they are not spans of their own."""
+
+    inputs: int = 0
+    batches: int = 0
+    retries: int = 0
+    max_batch_seconds: float = 0.0
+
+    def attributes(self) -> dict[str, Any]:
+        return {
+            "embedding.inputs": self.inputs,
+            "embedding.batches": self.batches,
+            "tei.retries": self.retries,
+            "tei.max_batch_ms": round(self.max_batch_seconds * 1000),
+        }
 
 
 def _char_offsets(text: str) -> dict[int, int]:
@@ -119,10 +133,12 @@ class TeiEncoder:
             self.http.headers["Host"] = self.settings.tei_host
         self._info: dict[str, Any] | None = None
 
-    def _call(self, method: str, path: str, payload: dict[str, Any] | None = None) -> Any:
+    def _call(self, method: str, path: str, payload: dict[str, Any] | None = None, tally: _Tally | None = None) -> Any:
         """One request, retried on 429/503 and connection errors with exponential backoff."""
         attempts = self.settings.tei_attempts
         for attempt in range(1, attempts + 1):
+            if attempt > 1 and tally is not None:
+                tally.retries += 1
             try:
                 response = self.http.request(
                     method, f"{self.base}{path}", json=payload, timeout=self.settings.tei_timeout
@@ -159,31 +175,47 @@ class TeiEncoder:
     def _batches(self, texts: Sequence[str]) -> Iterator[list[str]]:
         return (list(batch) for batch in batches(texts, self.batch_size))
 
-    def _pieces(self, texts: Sequence[str]) -> list[list[str]]:
+    def _pieces(self, texts: Sequence[str], tally: _Tally) -> list[list[str]]:
         """Every text as the pieces that fit the model's input length (usually one)."""
         limit = self.info["max_input_length"]
         pieces: list[list[str]] = []
         for batch in self._batches(texts):
-            tokenized = self._call("POST", "/tokenize", {"inputs": batch, "add_special_tokens": True})
+            tokenized = self._call("POST", "/tokenize", {"inputs": batch, "add_special_tokens": True}, tally)
             pieces.extend(split(text, tokens, limit) for text, tokens in zip(batch, tokenized, strict=True))
         return pieces
 
-    def _embed(self, texts: Sequence[str]) -> list[Vector]:
+    def _embed(self, texts: Sequence[str], tally: _Tally) -> list[Vector]:
+        model = self.name
         vectors: list[Vector] = []
         for batch in self._batches(texts):
-            with _measured("documents", self.name, len(batch), **{"embedding.batch_size": self.batch_size}):
-                vectors.extend(self._call("POST", "/embed", {"inputs": batch, "normalize": True, "truncate": True}))
+            started = time.perf_counter()
+            vectors.extend(self._call("POST", "/embed", {"inputs": batch, "normalize": True, "truncate": True}, tally))
+            seconds = time.perf_counter() - started
+            metrics.record_embedding("documents", model, len(batch), seconds)
+            tally.inputs += len(batch)
+            tally.batches += 1
+            tally.max_batch_seconds = max(tally.max_batch_seconds, seconds)
         return vectors
 
     def documents(self, texts: Sequence[str]) -> list[Vector]:
         """One normalized vector per text; a split text gets the normalized mean of its pieces."""
         if not texts:
             return []
-        pieces = self._pieces(texts)
-        split_count = sum(1 for parts in pieces if len(parts) > 1)
-        if split_count:
-            logger.info("Split %d of %d texts longer than the model's input length", split_count, len(texts))
-        flat = self._embed([piece for parts in pieces for piece in parts])
+        attributes = {
+            "embedding.model": self.name,
+            "embedding.texts": len(texts),
+            "embedding.batch_size": self.batch_size,
+        }
+        tally = _Tally()
+        with span("embeddings.documents", **attributes), untraced_http():
+            try:
+                pieces = self._pieces(texts, tally)
+                split_count = sum(1 for parts in pieces if len(parts) > 1)
+                if split_count:
+                    logger.info("Split %d of %d texts longer than the model's input length", split_count, len(texts))
+                flat = self._embed([piece for parts in pieces for piece in parts], tally)
+            finally:
+                annotate(**tally.attributes())
         vectors: list[Vector] = []
         position = 0
         for parts in pieces:

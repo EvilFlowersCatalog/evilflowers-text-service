@@ -12,7 +12,8 @@ def session(api_key: SecretStr | None = None) -> requests.Session:
     """A session with our User-Agent and, when given, the bearer key.
 
     ``requests`` is instrumented by OpenTelemetry once telemetry is on, so every
-    call made through it carries ``traceparent``.
+    call made through it carries ``traceparent``, except inside
+    ``observability.untraced_http()`` (the tei-embed batch loop).
     """
     http = requests.Session()
     http.headers["User-Agent"] = USER_AGENT

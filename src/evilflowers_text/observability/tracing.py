@@ -1,11 +1,26 @@
 """Hand-made spans where the time goes (PDF parsing, model load, encoding); no-ops without OpenTelemetry."""
 
 from collections.abc import Iterator
-from contextlib import contextmanager
+from contextlib import AbstractContextManager, contextmanager, nullcontext
 from typing import Any
 
 from evilflowers_text.observability.context import clean
 from evilflowers_text.observability.otel import SCOPE, Status, StatusCode, trace
+
+try:  # Ships with the `telemetry` extra (the requests instrumentation), not with the bare API.
+    from opentelemetry.instrumentation.utils import suppress_http_instrumentation
+except ImportError:  # pragma: no cover - the image installs the extra
+    suppress_http_instrumentation = None
+
+
+def untraced_http() -> AbstractContextManager[Any]:
+    """No CLIENT span (and no ``traceparent``) for the ``requests`` calls in the block.
+
+    For request loops whose per-call spans would swamp the trace (one task, hundreds
+    of TEI batches): the block's own span carries the totals, the metrics the per-call
+    timings, and the server side traces (and samples) its requests as roots of its own.
+    """
+    return suppress_http_instrumentation() if suppress_http_instrumentation is not None else nullcontext()
 
 
 @contextmanager
