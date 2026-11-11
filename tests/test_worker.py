@@ -2,6 +2,7 @@
 
 import inspect
 
+from evilflowers_text.settings import Settings
 from evilflowers_text.worker import app
 
 TASKS = {
@@ -29,3 +30,11 @@ def test_extraction_jobs_accept_arguments_a_newer_analyzer_adds():
         parameters = inspect.signature(app.tasks[name].run).parameters.values()
         assert any(parameter.kind is inspect.Parameter.VAR_KEYWORD for parameter in parameters)
         assert app.tasks[name].acks_late
+
+
+def test_visibility_timeout_outlasts_every_task_on_the_shared_redis_db(monkeypatch):
+    # 12 h, like the catalog and the analyzer: an equation pass on the same db took over 2 h.
+    monkeypatch.delenv("BROKER_VISIBILITY_TIMEOUT", raising=False)
+    assert Settings(_env_file=None).broker_visibility_timeout == 43200
+    monkeypatch.setenv("BROKER_VISIBILITY_TIMEOUT", "600")
+    assert Settings(_env_file=None).broker_visibility_timeout == 600

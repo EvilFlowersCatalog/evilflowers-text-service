@@ -21,9 +21,11 @@ class Settings(BaseSettings):
     redis_url: str = "redis://redis:6379/0"
     #: The extraction jobs.
     queue: str = Field("evilflowers_text_worker", validation_alias=AliasChoices("TEXT_QUEUE", "QUEUE"))
-    #: Seconds before Redis redelivers an unacknowledged message. The extraction jobs
-    #: acknowledge late, so this must outlast the longest book (about 30 minutes).
-    broker_visibility_timeout: int = 7200
+    #: Seconds before Redis redelivers an unacknowledged message. Every consumer of a Redis db
+    #: restores *all* unacked messages older than its own timeout, in any queue, so this must
+    #: outlast the longest task of any service sharing the db, not only this one's
+    #: (an equation pass took over 2 h; EvilFlowersCatalog#120).
+    broker_visibility_timeout: int = 43200
 
     # -- Storage and provenance -----------------------------------------------------
     #: The catalog's storage root: originals are read here, crops written.
