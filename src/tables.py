@@ -13,6 +13,7 @@ import pdfplumber
 
 import crops
 import settings
+import table_review
 
 logger = logging.getLogger(__name__)
 
@@ -80,6 +81,9 @@ def extract(path: str, output_dir: str, regions: List[dict]) -> List[dict]:
                 image = crops.render(page, crops.rect(region["bbox"], page), settings.CROP_DPI)
                 name = crops.crop_name(output_dir, region["page"], "tab", region["seq"])
                 crops.save(image, name)
+                markdown = read_table(plumber.pages[region["page"] - 1], region["bbox"])
+                if table_review.enabled():
+                    markdown = table_review.review(image, markdown)
                 kept.append(
                     {
                         "kind": "table",
@@ -88,7 +92,7 @@ def extract(path: str, output_dir: str, regions: List[dict]) -> List[dict]:
                         "bbox": region["bbox"],
                         "image_path": name,
                         "caption": region.get("caption"),
-                        "markdown": read_table(plumber.pages[region["page"] - 1], region["bbox"]),
+                        "markdown": markdown,
                     }
                 )
             except Exception:

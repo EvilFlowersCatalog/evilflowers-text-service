@@ -23,6 +23,16 @@ IMAGE_TAG = os.getenv("IMAGE_TAG", "dev")
 CROP_DPI = int(os.getenv("CROP_DPI", "144"))
 WEBP_QUALITY = int(os.getenv("WEBP_QUALITY", "82"))
 
+#: Tables: a multimodal model behind an Ollama endpoint checks pdfplumber's
+#: markdown against the crop and rewrites it when wrong (off by default).
+TABLE_REVIEW_ENABLED = os.getenv("TABLE_REVIEW_ENABLED", "0").lower() in ("1", "true", "yes")
+#: Full chat URL, e.g. http://ollama:11434/api/chat or https://ollama.com/api/chat.
+OLLAMA_ENDPOINT = os.getenv("OLLAMA_ENDPOINT")
+OLLAMA_API_KEY = os.getenv("OLLAMA_API_KEY")
+TABLE_REVIEW_MODEL = os.getenv("TABLE_REVIEW_MODEL", "qwen2.5vl:7b")
+TABLE_REVIEW_TIMEOUT = int(os.getenv("TABLE_REVIEW_TIMEOUT", "300"))
+TABLE_REVIEW_MAX_SIDE = int(os.getenv("TABLE_REVIEW_MAX_SIDE", "1600"))
+
 #: Paragraph embeddings (IP-018 Q16). Any sentence-transformers model of the
 #: catalog's vector dimension (768): Snowflake Arctic Embed M v2.0 by default,
 #: stsb-xlm-r-multilingual selectable. Changing it bumps the catalog's pipeline version.

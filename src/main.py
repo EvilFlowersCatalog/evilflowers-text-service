@@ -9,6 +9,7 @@ import fitz
 import embeddings
 import paragraphs
 import settings
+import table_review
 import tables
 from catalog import Catalog, RunNotRunning
 from text_handler.TextService import TextService
@@ -128,7 +129,10 @@ def tables_task(run_id: str, source: str, output_dir: str, regions: list, **_):
         return
     try:
         catalog.regions(kept)
-        catalog.job("tables", provenance={"image": settings.IMAGE_TAG, "extractor": "pdfplumber"})
+        provenance = {"image": settings.IMAGE_TAG, "extractor": "pdfplumber"}
+        if table_review.enabled():
+            provenance["review_model"] = settings.TABLE_REVIEW_MODEL
+        catalog.job("tables", provenance=provenance)
     except RunNotRunning:
         logger.warning("Run %s is not accepting results", run_id)
 
