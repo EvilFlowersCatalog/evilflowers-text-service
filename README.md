@@ -40,7 +40,12 @@ The search-service tasks (`process_pdf`, `delete_document`, `stats`) and the rea
 - A paragraph longer than `max_input_length` (512 tokens, counted with `POST /tokenize`) is split at sentence starts.
   Its pieces are embedded separately, and the paragraph gets their normalized mean. TEI's truncation is only the
   backstop.
-- Each request gets 60 s. 429, 503 and connection errors are retried 3 times with backoff.
+- Each request gets 60 s. 429, 503 and connection errors are retried 3 times with backoff, per batch.
+- Up to `TEI_CONCURRENCY` batches are in flight at once (default 1: every `/tokenize`, then every `/embed`, one at a
+  time). Above 1, a text batch's pieces are embedded as soon as its `/tokenize` is back, and the router spreads the
+  requests over the lane's replicas. The `/embed` batches and the vectors' order are the same at any concurrency.
+- `TEI_LANE` (`bulk` or `interactive`), when set, goes out as the `x-embed-lane` header on every request and picks the
+  router's lane, over the Host header (knowledge base, `Proposals/Embed-Lanes`). This worker sends `bulk`.
 - `GET /info` is read once per process. The run's `provenance.paragraphs.embedding_model` is
   `"<model_id>@<model_sha>"`, for example
   `intfloat/multilingual-e5-large-instruct@274baa43b0e13e37fafa6428dbc7938e62e5c439`. The catalog never compares
@@ -54,7 +59,7 @@ src/evilflowers_text/
 ├── settings.py        typed settings from the environment (pydantic-settings)
 ├── schemas.py         messages received and payloads the catalog ingests (mirror of its forms)
 ├── jobs.py            the IP-018 job protocol (extract → publish → report) and the tables/paragraphs jobs
-├── embeddings.py      `Encoder` protocol; the tei-embed client (batching, long-paragraph split, retries)
+├── embeddings.py      `Encoder` protocol; the tei-embed client (batching, long-paragraph split, retries, concurrency)
 ├── tasks/             thin Celery adapters for the extraction jobs
 ├── extraction/        paragraphs, tables, page geometry and crops
 ├── clients/           catalog ingestion API, shared HTTP session
@@ -87,6 +92,8 @@ defaults and meaning. The ones a deployment sets:
 - `TEI_URL` (default `http://tei-embed.shared.svc.cluster.local`) and `TEI_API_KEY` (1Password
   `ELVIRA/stu.inference.tei/api_key`). From Compose on gateway, also set `TEI_URL=http://192.168.122.227:8081` and
   `TEI_HOST=embed.elvira.internal`.
+- `TEI_LANE=bulk`, and `TEI_CONCURRENCY` (3–4 on dev). It bounds the requests in flight per worker process, so the
+  bulk lane (1–3 `tei-embed-bulk` replicas by HPA) sees up to worker replicas × `TEI_CONCURRENCY`.
 - `IMAGE_TAG`, built in by CI
 
 The model is whatever `tei-embed` serves. A new model or revision is a new pipeline version in the catalog: run
@@ -97,13 +104,16 @@ The model is whatever `tei-embed` serves. A new model or revision is a new pipel
 The service follows the cluster's telemetry contract (knowledge base, `Cookbooks/Deploy-a-Service` §3).
 
 - **Traces.** Every task gets a CONSUMER span that continues the caller's trace, and every catalog or tei-embed call
-  gets a CLIENT span carrying `traceparent`. Hand-made spans cover PDF parsing and each embedding batch. The
+  gets a CLIENT span carrying `traceparent`, except the tei-embed batches. Hand-made spans cover PDF parsing and
+  each `embeddings.documents` call, with its batch count, retries, slowest batch, `tei.concurrency` and the
+  `tei.lane` that served it (issue #10: no per-batch spans). The
   endpoint comes from `OTEL_EXPORTER_OTLP_ENDPOINT`, or from `HOST_IP` when only that is set; with neither,
   telemetry is off.
 - **Metrics** (Mimir):
   - `text_task_duration_seconds`
   - `text_job_outcome_total{job,outcome}`
-  - `text_embedding_duration_seconds`, `text_embedding_inputs_total`
+  - `text_embedding_duration_seconds{kind,model,lane}`, `text_embedding_inputs_total{kind,model,lane}` (`lane` when
+    the router answers `x-embed-lane`)
   - `text_document_paragraphs`
   - `text_tables_regions_total{markdown}`
   - `text_catalog_retries_total`

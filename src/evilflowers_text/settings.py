@@ -10,7 +10,7 @@ from functools import lru_cache
 from pathlib import Path
 from typing import Literal
 
-from pydantic import AliasChoices, Field, SecretStr
+from pydantic import AliasChoices, Field, SecretStr, field_validator
 from pydantic_settings import BaseSettings, SettingsConfigDict
 
 
@@ -65,6 +65,13 @@ class Settings(BaseSettings):
     tei_timeout: float = 60.0
     #: The first try plus three retries on 429/503 and connection errors.
     tei_attempts: int = 4
+    #: Batches in flight at once within one `documents()` call. 1 keeps the requests strictly
+    #: sequential (every `/tokenize`, then every `/embed`); above 1 tokenizing and embedding
+    #: overlap, and the router spreads the requests over the bulk lane's replicas (issue #11).
+    tei_concurrency: int = Field(1, ge=1)
+    #: Sent as `x-embed-lane` on every request when set: `bulk` for this worker, `interactive` is
+    #: the catalog's search queries. It beats the router's Host-based choice. Empty: no header.
+    tei_lane: Literal["bulk", "interactive"] | None = None
 
     # -- Paragraph index (IP-018 Phase 2b) ------------------------------------------------
     #: Paragraphs shorter than this many words are not indexed (tp2025 `MIN_PARAGRAPH_LENGTH`).
@@ -72,6 +79,12 @@ class Settings(BaseSettings):
     #: `similar` links per paragraph, and the cosine floor below which none is made.
     similar_links_k: int = 5
     similar_min_score: float = 0.6
+
+    @field_validator("tei_lane", mode="before")
+    @classmethod
+    def _empty_lane_is_none(cls, value: object) -> object:
+        """`TEI_LANE=` (as `.env.sample` and manifests may leave it) means no lane."""
+        return None if isinstance(value, str) and not value.strip() else value
 
     def source_path(self, source: str) -> Path:
         """Absolute path of a file the catalog names relative to its storage root."""

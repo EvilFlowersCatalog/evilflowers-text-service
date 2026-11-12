@@ -75,8 +75,10 @@ def record_job(job: str, outcome: str) -> None:
     JOB_OUTCOME.add(1, {"job": job, "outcome": outcome})
 
 
-def record_embedding(kind: str, model: str, inputs: int, seconds: float) -> None:
-    """``kind``: documents (paragraph batches)."""
+def record_embedding(kind: str, model: str, inputs: int, seconds: float, lane: str | None = None) -> None:
+    """``kind``: documents (paragraph batches). ``lane``: the embed lane that served the batch, if the router said."""
     attributes = {"kind": kind, "model": model}
+    if lane:
+        attributes["lane"] = lane
     EMBEDDING_DURATION.record(seconds, attributes)
     EMBEDDING_INPUTS.add(inputs, attributes)
