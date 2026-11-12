@@ -21,6 +21,7 @@ from evilflowers_text import embeddings
 from evilflowers_text.clients.catalog import CatalogClient, RunNotRunning
 from evilflowers_text.embeddings import Encoder
 from evilflowers_text.extraction import paragraphs
+from evilflowers_text.extraction.table_review import TableReviewer
 from evilflowers_text.extraction.tables import TableReader
 from evilflowers_text.observability import bind, fail, metrics, span
 from evilflowers_text.schemas import JobReport, LayoutRegion, Paragraph, ParagraphLink, Region
