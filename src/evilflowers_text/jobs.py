@@ -101,8 +101,21 @@ class TablesJob(ExtractionJob[list[Region]]):
         super().__init__(run_id, source, **kwargs)
         self.output_dir = output_dir
         self.raw_regions = regions
+        reviewer = None
+        if self.settings.table_review_enabled and self.settings.ollama_endpoint:
+            key = self.settings.ollama_api_key
+            reviewer = TableReviewer(
+                self.settings.ollama_endpoint,
+                self.settings.table_review_model,
+                api_key=key.get_secret_value() if key else None,
+                timeout=self.settings.table_review_timeout,
+                max_side=self.settings.table_review_max_side,
+            )
         self.reader = TableReader(
-            self.settings.storage_path, dpi=self.settings.crop_dpi, quality=self.settings.webp_quality
+            self.settings.storage_path,
+            dpi=self.settings.crop_dpi,
+            quality=self.settings.webp_quality,
+            reviewer=reviewer,
         )
 
     def extract(self) -> list[Region]:

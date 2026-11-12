@@ -13,6 +13,7 @@ import pdfplumber
 import pymupdf
 
 from evilflowers_text.extraction import geometry
+from evilflowers_text.extraction.table_review import TableReviewer
 from evilflowers_text.observability import metrics
 from evilflowers_text.schemas import Box, LayoutRegion, Region
 
@@ -79,15 +80,18 @@ def read_table(plumber_page, box: Box) -> str | None:
 class TableReader:
     """Reads the analyzer's table regions of one PDF into catalog regions with a WebP crop each."""
 
-    def __init__(self, storage_path: Path, *, dpi: int, quality: int):
+    def __init__(self, storage_path: Path, *, dpi: int, quality: int, reviewer: TableReviewer | None = None):
         self.storage_path = storage_path
         self.dpi = dpi
         self.quality = quality
+        self.reviewer = reviewer
 
-    @staticmethod
-    def versions() -> dict[str, str]:
+    def versions(self) -> dict[str, str]:
         """The libraries behind the markdown and the crops, for the run's provenance."""
-        return {"extractor": "pdfplumber", "pdfplumber": pdfplumber.__version__, "pymupdf": pymupdf.VersionBind}
+        versions = {"extractor": "pdfplumber", "pdfplumber": pdfplumber.__version__, "pymupdf": pymupdf.VersionBind}
+        if self.reviewer:
+            versions["review_model"] = self.reviewer.model
+        return versions
 
     def read(self, path: Path, output_dir: str, regions: Sequence[LayoutRegion]) -> list[Region]:
         """One region per readable table; a region that fails is logged and skipped, never the document."""
@@ -106,6 +110,8 @@ class TableReader:
         name = geometry.crop_name(output_dir, region.page, "tab", region.seq)
         geometry.save(image, self.storage_path / name, self.quality)
         text = read_table(plumber.pages[region.page - 1], region.bbox)
+        if self.reviewer:
+            text = self.reviewer.review(image, text)
         metrics.TABLES.add(1, {"markdown": "read" if text else "unreadable"})
         return Region(
             kind="table",

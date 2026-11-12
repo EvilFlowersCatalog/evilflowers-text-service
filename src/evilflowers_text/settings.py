@@ -50,6 +50,20 @@ class Settings(BaseSettings):
     crop_dpi: int = 144
     webp_quality: int = 82
 
+    # -- Table review: a multimodal model behind an Ollama chat endpoint ---------------------
+    #: Checks pdfplumber's markdown against the crop and rewrites it when wrong. Off unless
+    #: enabled and an endpoint is set.
+    table_review_enabled: bool = False
+    #: Full chat URL; in k8s the shared `http://ollama.shared.svc.cluster.local/api/chat`.
+    ollama_endpoint: str | None = None
+    #: Bearer key, only for Ollama Cloud.
+    ollama_api_key: SecretStr | None = None
+    #: A model with the `vision` capability.
+    table_review_model: str = "qwen3.6:35b-a3b-q4_K_M"
+    table_review_timeout: float = 300.0
+    #: Longest side of the image sent to the model, in pixels.
+    table_review_max_side: int = 1600
+
     # -- Embeddings: the shared tei-embed (knowledge base, Cookbooks/Shared-Inference) ----------
     #: In k8s the Service; from Compose on gateway `http://192.168.122.227:8081` with `TEI_HOST`.
     #: The served model (multilingual-e5-large-instruct, 1024 dims) is TEI's, read from `/info`;
