@@ -23,7 +23,7 @@ check: lint test
 
 # A local worker (needs a reachable REDIS_URL, and TEI_URL/TEI_API_KEY for the paragraphs job).
 worker:
-	uv run celery -A evilflowers_text.worker worker --loglevel=INFO -E --pool=solo --queues=evilflowers_text_worker
+	uv run celery -A evilflowers_text.worker worker --loglevel=INFO -E --pool=prefork --concurrency=1
 
 image:
 	docker build --build-arg IMAGE_TAG=local@$$(git rev-parse --short HEAD) -t evilflowers-text-service:local .

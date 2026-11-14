@@ -7,6 +7,12 @@ unless the catalog itself refused the run (409, `RunNotRunning`).
 
 `ExtractionJob.run` is that protocol, once. A job only says how it extracts,
 what it publishes and what provenance it records.
+
+A job may arrive more than once for a run: the analyzer's own task can be
+redelivered and dispatch the jobs again, or a message can come back after a
+worker died. So before the work a job reads its run, and does nothing unless the
+run is `running` and still waits for this job (issue #12). Otherwise a copy would
+embed a whole book again only to be refused with 409 at the end.
 """
 
 import logging
@@ -28,7 +34,8 @@ from evilflowers_text.settings import Settings, get_settings
 
 logger = logging.getLogger(__name__)
 
-Outcome = Literal["done", "failed", "not_running"]
+#: `not_running`: the run no longer accepts results; `already_done`: the job reported before (a copy).
+Outcome = Literal["done", "failed", "not_running", "already_done"]
 
 
 class ExtractionJob[Result](ABC):
@@ -62,6 +69,17 @@ class ExtractionJob[Result](ABC):
     def run(self) -> Outcome:
         with bind(run_id=self.run_id, job=self.name, source=self.source):
             try:
+                state = self.catalog.run()
+                if skip := state.skip_reason(self.name):
+                    logger.warning(
+                        "Skipping job %s for run %s: %s (run %s, job %s)",
+                        self.name,
+                        self.run_id,
+                        skip,
+                        state.status,
+                        state.jobs.get(self.name),
+                    )
+                    return self._outcome(skip)
                 result = self.extract()
                 self.publish(result)
                 self.catalog.job(self.name, JobReport(status="done", provenance=self.provenance()))
@@ -76,7 +94,14 @@ class ExtractionJob[Result](ABC):
             self.done(result)
             return self._outcome("done")
 
-    def _report_failure(self, error: Exception) -> None:
+    def report_failure(self, error: BaseException) -> Outcome:
+        """Report the job failed without running it: its worker process died on every try."""
+        with bind(run_id=self.run_id, job=self.name, source=self.source):
+            logger.error("Job %s for run %s lost its worker process: %s", self.name, self.run_id, error)
+            self._report_failure(error)
+            return self._outcome("failed")
+
+    def _report_failure(self, error: BaseException) -> None:
         # Report it, or the run waits for this job forever.
         report = JobReport(status="failed", error=f"{type(error).__name__}: {error}", provenance=self.provenance())
         try:

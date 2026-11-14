@@ -13,8 +13,14 @@ it).
 
 | Task | Queue | Sent by | Does |
 |---|---|---|---|
-| `evilflowers_text_worker.tables` | `evilflowers_text_worker` | analyzer, kwargs `run_id, source, output_dir, regions` | Reads the analyzer's table regions with pdfplumber into markdown and writes a WebP crop of each. Posts them to `/regions` with `printed_caption` and position. |
-| `evilflowers_text_worker.paragraphs` | `evilflowers_text_worker` | analyzer, kwargs `run_id, source, output_dir` | Builds the paragraph index: paragraphs, sentence offsets and quads, section, one 1024-d embedding each, and `next`/`similar` links. Posts it to `/paragraphs`. |
+| `evilflowers_text_worker.tables` | `evilflowers.text.tables` (`TABLES_QUEUE`) | analyzer, kwargs `run_id, source, output_dir, regions` | Reads the analyzer's table regions with pdfplumber into markdown and writes a WebP crop of each. Posts them to `/regions` with `printed_caption` and position. |
+| `evilflowers_text_worker.paragraphs` | `evilflowers.text.paragraphs` (`PARAGRAPHS_QUEUE`) | analyzer, kwargs `run_id, source, output_dir` | Builds the paragraph index: paragraphs, sentence offsets and quads, section, one 1024-d embedding each, and `next`/`similar` links. Posts it to `/paragraphs`. |
+
+Each job has its own queue (issue #13): tables wait on the table review, paragraphs on the bulk embed lane, and in
+one shared queue a slow table review held up every paragraph task behind it. Two lists also let each job be scaled
+on its own. The analyzer names the queue when it sends. The worker consumes the queues in `TEXT_QUEUE`
+(comma-separated). Left empty, it consumes both, plus the legacy `evilflowers_text_worker`, so messages already
+there or sent by an older analyzer are still run. A `--queues` option on the command line overrides `TEXT_QUEUE`.
 
 The search-service tasks (`process_pdf`, `delete_document`, `stats`) and the readers' `embed_query` (queue
 `evilflowers_text_embed`) are gone: search moved into the catalog, which calls `tei-embed` directly.
@@ -25,9 +31,25 @@ The search-service tasks (`process_pdf`, `delete_document`, `stats`) and the rea
 
 - **Every job reports `done` or `failed`**, because a run finishes only when all of its declared jobs have reported
   (`jobs.ExtractionJob.run`).
-- **A 409 is the exception.** It means the catalog no longer accepts the run, and the job then stops quietly.
+- **A 409 is the exception.** The catalog no longer accepts the run, or already holds these paragraphs, and the job
+  then stops quietly.
+- **Copies stop before the work** (issue #12). A job can arrive twice for one run: the analyzer's own task may be
+  redelivered and dispatch every job again, or a message comes back after a worker died. Before reading the PDF, a
+  job reads its run (`GET /extraction/v1/runs/{run_id}`). It goes on only while the run is `running` and its own
+  job is `pending`. Otherwise it logs why, posts nothing, and records outcome `not_running` or `already_done`. A
+  copy costs one request instead of embedding the book again only to get a 409 at the end. If that read fails, the
+  job is reported `failed` like any other error.
 - **Late acknowledgement.** The jobs acknowledge their messages late, so a worker that dies mid-book has the book
-  redelivered.
+  redelivered. Under prefork a job runs in a child process. If only the child dies (an OOM on a large book), the
+  job is sent again after 60 s, up to 2 times (`tasks.extraction.LOST_RETRIES`). After that it is reported `failed`,
+  so a book that always kills the worker neither loops nor leaves its run waiting.
+- **SIGTERM requeues the running job** (issue #13). The image runs `--pool=prefork --concurrency=1`, still one job
+  at a time. On SIGTERM (a scale-in, a rollout), the job gets `WORKER_SOFT_SHUTDOWN_TIMEOUT` seconds (default 10)
+  to finish. After that it is cancelled, and Redis has its message back at once instead of after the visibility
+  timeout (12 h). This is Celery's soft shutdown, with SIGTERM made a cold shutdown (`worker.requeue_on_sigterm`,
+  the same as `REMAP_SIGTERM=SIGQUIT`). Under `--pool=solo` SIGTERM stays a warm shutdown: solo cannot cancel a
+  task, and the failed cancel would get the message acknowledged and lost. A job cancelled in the middle of posting
+  paragraphs leaves part of them stored, and its copy is then refused with 409.
 
 ## Embeddings
 
@@ -87,6 +109,8 @@ All settings are environment variables. `.env.sample` lists them, and `src/evilf
 defaults and meaning. The ones a deployment sets:
 
 - `REDIS_URL`
+- `TEXT_QUEUE`, only for a Deployment that runs one job: `evilflowers.text.tables` or `evilflowers.text.paragraphs`
+- `WORKER_SOFT_SHUTDOWN_TIMEOUT`, below the pod's termination grace period
 - `STORAGE_PATH`, the catalog's storage root, mounted read/write
 - `CATALOG_API_URL` and `CATALOG_API_KEY`
 - `TEI_URL` (default `http://tei-embed.shared.svc.cluster.local`) and `TEI_API_KEY` (1Password
@@ -111,7 +135,7 @@ The service follows the cluster's telemetry contract (knowledge base, `Cookbooks
   telemetry is off.
 - **Metrics** (Mimir):
   - `text_task_duration_seconds`
-  - `text_job_outcome_total{job,outcome}`
+  - `text_job_outcome_total{job,outcome}` (`done`, `failed`, `not_running`, `already_done`)
   - `text_embedding_duration_seconds{kind,model,lane}`, `text_embedding_inputs_total{kind,model,lane}` (`lane` when
     the router answers `x-embed-lane`)
   - `text_document_paragraphs`

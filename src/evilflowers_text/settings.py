@@ -8,10 +8,14 @@ the k8s manifests.
 
 from functools import lru_cache
 from pathlib import Path
-from typing import Literal
+from typing import Annotated, Literal
 
 from pydantic import AliasChoices, Field, SecretStr, field_validator
-from pydantic_settings import BaseSettings, SettingsConfigDict
+from pydantic_settings import BaseSettings, NoDecode, SettingsConfigDict
+
+#: The queue both jobs shared before issue #13. Still consumed by default, so messages already
+#: in it, or sent by an analyzer that predates the split, are not stranded.
+LEGACY_QUEUE = "evilflowers_text_worker"
 
 
 class Settings(BaseSettings):
@@ -19,8 +23,20 @@ class Settings(BaseSettings):
 
     # -- Celery -------------------------------------------------------------------
     redis_url: str = "redis://redis:6379/0"
-    #: The extraction jobs.
-    queue: str = Field("evilflowers_text_worker", validation_alias=AliasChoices("TEXT_QUEUE", "QUEUE"))
+    #: Where each job is routed (issue #13): tables wait on the table review, paragraphs on the
+    #: bulk embed lane, so each gets its own list and can be scaled on its own.
+    #: `evilflowers.<service>[.<job>]`, the naming of knowledge#14.
+    tables_queue: str = "evilflowers.text.tables"
+    paragraphs_queue: str = "evilflowers.text.paragraphs"
+    #: The queues this worker consumes, comma-separated (`TEXT_QUEUE`). Empty: both jobs' queues
+    #: and the legacy one. One Deployment per job sets just its own queue.
+    queues: Annotated[tuple[str, ...], NoDecode] = Field((), validation_alias=AliasChoices("TEXT_QUEUE", "QUEUE"))
+    #: Seconds a running job gets after SIGTERM before it is cancelled and its message goes back
+    #: to the queue (Celery soft shutdown). 0 cancels it at once. Needs a pool that can cancel a
+    #: task (prefork); under `--pool=solo` SIGTERM stays a warm shutdown (`worker.py`).
+    worker_soft_shutdown_timeout: float = Field(10.0, ge=0)
+    #: Wait the soft shutdown timeout even with no job running.
+    worker_enable_soft_shutdown_on_idle: bool = False
     #: Seconds before Redis redelivers an unacknowledged message. Every consumer of a Redis db
     #: restores *all* unacked messages older than its own timeout, in any queue, so this must
     #: outlast the longest task of any service sharing the db, not only this one's
@@ -79,6 +95,18 @@ class Settings(BaseSettings):
     #: `similar` links per paragraph, and the cosine floor below which none is made.
     similar_links_k: int = 5
     similar_min_score: float = 0.6
+
+    @field_validator("queues", mode="before")
+    @classmethod
+    def _split_queues(cls, value: object) -> object:
+        """`TEXT_QUEUE=a,b` or a single name, as the manifests have always set it."""
+        if isinstance(value, str):
+            return tuple(name.strip() for name in value.split(",") if name.strip())
+        return value
+
+    @property
+    def consumed_queues(self) -> tuple[str, ...]:
+        return self.queues or (self.tables_queue, self.paragraphs_queue, LEGACY_QUEUE)
 
     @field_validator("tei_lane", mode="before")
     @classmethod

@@ -71,7 +71,8 @@ CATALOG_RETRIES = Instrument(
 
 
 def record_job(job: str, outcome: str) -> None:
-    """``outcome``: done, failed or not_running (the catalog refused the results)."""
+    """``outcome``: done, failed, not_running (the catalog refused the results, or the run had stopped)
+    or already_done (a copy of a job that had reported; skipped before the work)."""
     JOB_OUTCOME.add(1, {"job": job, "outcome": outcome})
 
 

@@ -1,3 +1,5 @@
+import json
+
 import pytest
 import requests
 
@@ -14,7 +16,7 @@ class Response:
         self.text = body.decode()
 
     def json(self):
-        return {}
+        return json.loads(self.content)
 
     def raise_for_status(self):
         if self.status_code >= 400:
@@ -25,13 +27,21 @@ class Session:
     def __init__(self, *responses):
         self.responses = list(responses)
         self.posts: list[tuple[str, dict]] = []
+        self.gets: list[str] = []
 
-    def post(self, url, json, timeout):
-        self.posts.append((url, json))
+    def _next(self):
         response = self.responses.pop(0) if self.responses else Response()
         if isinstance(response, Exception):
             raise response
         return response
+
+    def post(self, url, json, timeout):
+        self.posts.append((url, json))
+        return self._next()
+
+    def get(self, url, timeout):
+        self.gets.append(url)
+        return self._next()
 
 
 @pytest.fixture(autouse=True)
@@ -85,6 +95,31 @@ def test_conflict_means_the_run_is_not_running(settings):
     with pytest.raises(RunNotRunning):
         CatalogClient("run", settings=settings, http=http).job("tables", JobReport(status="done"))
     assert len(http.posts) == 1
+
+
+RUN = {
+    "response": {
+        "id": "run",
+        "status": "running",
+        "jobs": {"paragraphs": "done", "tables": "pending"},
+        "attempt": 3,
+        "storage_dir": "extraction/run",
+    }
+}
+
+
+def test_run_reads_status_and_jobs_from_the_envelope(settings):
+    http = Session(Response(502), Response(200, json.dumps(RUN).encode()))
+    state = CatalogClient("run", settings=settings, http=http).run()
+    assert http.gets == ["http://catalog:8000/extraction/v1/runs/run"] * 2
+    assert state.status == "running" and state.jobs == {"paragraphs": "done", "tables": "pending"}
+    assert state.skip_reason("paragraphs") == "already_done" and state.skip_reason("tables") is None
+
+
+def test_a_missing_run_raises(settings):
+    http = Session(Response(404, b'{"title": "Extraction run not found"}'))
+    with pytest.raises(requests.HTTPError):
+        CatalogClient("run", settings=settings, http=http).run()
 
 
 def test_job_error_is_truncated():

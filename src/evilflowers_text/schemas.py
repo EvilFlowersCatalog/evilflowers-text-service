@@ -117,6 +117,27 @@ class JobReport(BaseModel):
         return value[:MAX_ERROR_LENGTH] if value else None
 
 
+class RunState(BaseModel):
+    """What a job reads of its run before the work (`GET /extraction/v1/runs/{id}`, issue #12)."""
+
+    model_config = ConfigDict(extra="ignore")
+
+    status: str
+    #: `{job: pending | done | failed}`, as declared at the run's `/start`.
+    jobs: dict[str, str] = Field(default_factory=dict)
+
+    def skip_reason(self, job: str) -> Literal["not_running", "already_done"] | None:
+        """Why a copy of `job` must not do its work, or None when the run still waits for it.
+
+        `already_done`: the job is no longer `pending` (it reported, or the run never declared it).
+        """
+        if self.status != "running":
+            return "not_running"
+        if self.jobs.get(job) != "pending":
+            return "already_done"
+        return None
+
+
 def dump(model: BaseModel) -> dict[str, Any]:
     """JSON-ready, without the absent optional fields (the catalog treats them as unset)."""
     return model.model_dump(mode="json", exclude_none=True)

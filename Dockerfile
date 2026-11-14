@@ -39,5 +39,7 @@ ENV PATH=/app/.venv/bin:$PATH \
     IMAGE_TAG=${IMAGE_TAG}
 
 # No model in the image or the process: paragraphs are embedded by the shared tei-embed (TEI_URL).
-CMD ["celery", "-A", "evilflowers_text.worker", "worker", "--loglevel=INFO", "-E", "--pool=solo", \
-     "--queues=evilflowers_text_worker"]
+# Prefork with one child: still one job at a time, but SIGTERM can cancel it and requeue the message
+# (solo cannot; worker.requeue_on_sigterm). No --queues: TEXT_QUEUE picks them (default both + legacy).
+CMD ["celery", "-A", "evilflowers_text.worker", "worker", "--loglevel=INFO", "-E", \
+     "--pool=prefork", "--concurrency=1"]

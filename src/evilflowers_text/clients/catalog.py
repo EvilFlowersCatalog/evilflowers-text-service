@@ -14,14 +14,14 @@ import requests
 
 from evilflowers_text.clients.http import session
 from evilflowers_text.observability import metrics
-from evilflowers_text.schemas import JobReport, Paragraph, ParagraphLink, Region, dump
+from evilflowers_text.schemas import JobReport, Paragraph, ParagraphLink, Region, RunState, dump
 from evilflowers_text.settings import Settings, get_settings
 
 logger = logging.getLogger(__name__)
 
 
 class RunNotRunning(Exception):
-    """The catalog no longer accepts results for this run (409): it was reset or finished."""
+    """The catalog refused the results (409): the run was reset or finished, or already holds these paragraphs."""
 
 
 def batches[T](rows: Sequence[T], size: int) -> Iterator[Sequence[T]]:
@@ -35,12 +35,17 @@ class CatalogClient:
         self.base = f"{self.settings.catalog_api_url.rstrip('/')}/extraction/v1/runs/{run_id}"
         self.http = http or session(self.settings.catalog_api_key)
 
-    def _post(self, path: str, payload: dict[str, Any]) -> dict[str, Any]:
-        """POST with retries on connection errors and 5xx (exponential backoff); 409 → `RunNotRunning`."""
+    def _request(self, method: str, path: str, payload: dict[str, Any] | None = None) -> dict[str, Any]:
+        """A call with retries on connection errors and 5xx (exponential backoff); 409 → `RunNotRunning`."""
         attempts = self.settings.catalog_attempts
         for attempt in range(1, attempts + 1):
             try:
-                response = self.http.post(f"{self.base}{path}", json=payload, timeout=self.settings.catalog_timeout)
+                if method == "GET":
+                    response = self.http.get(f"{self.base}{path}", timeout=self.settings.catalog_timeout)
+                else:
+                    response = self.http.post(
+                        f"{self.base}{path}", json=payload, timeout=self.settings.catalog_timeout
+                    )
             except requests.RequestException:
                 if attempt == attempts:
                     raise
@@ -57,6 +62,14 @@ class CatalogClient:
             metrics.CATALOG_RETRIES.add(1, {"path": path, "reason": reason})
             time.sleep(2**attempt)
         return {}
+
+    def _post(self, path: str, payload: dict[str, Any]) -> dict[str, Any]:
+        return self._request("POST", path, payload)
+
+    def run(self) -> RunState:
+        """The run's status and jobs, read before the expensive part of a job (issue #12)."""
+        body = self._request("GET", "")
+        return RunState.model_validate(body.get("response", body))
 
     def start(self, page_count: int, page_sizes: list[list[float]], jobs: Iterable[str], provenance: dict) -> None:
         self._post(
