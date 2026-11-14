@@ -27,6 +27,7 @@ from evilflowers_text import embeddings
 from evilflowers_text.clients.catalog import CatalogClient, RunNotRunning
 from evilflowers_text.embeddings import Encoder
 from evilflowers_text.extraction import paragraphs
+from evilflowers_text.extraction.table_review import TableReviewer
 from evilflowers_text.extraction.tables import TableReader
 from evilflowers_text.observability import bind, fail, metrics, span
 from evilflowers_text.schemas import JobReport, LayoutRegion, Paragraph, ParagraphLink, Region
@@ -126,8 +127,21 @@ class TablesJob(ExtractionJob[list[Region]]):
         super().__init__(run_id, source, **kwargs)
         self.output_dir = output_dir
         self.raw_regions = regions
+        reviewer = None
+        if self.settings.table_review_enabled and self.settings.ollama_endpoint:
+            key = self.settings.ollama_api_key
+            reviewer = TableReviewer(
+                self.settings.ollama_endpoint,
+                self.settings.table_review_model,
+                api_key=key.get_secret_value() if key else None,
+                timeout=self.settings.table_review_timeout,
+                max_side=self.settings.table_review_max_side,
+            )
         self.reader = TableReader(
-            self.settings.storage_path, dpi=self.settings.crop_dpi, quality=self.settings.webp_quality
+            self.settings.storage_path,
+            dpi=self.settings.crop_dpi,
+            quality=self.settings.webp_quality,
+            reviewer=reviewer,
         )
 
     def extract(self) -> list[Region]:
