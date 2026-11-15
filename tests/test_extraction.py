@@ -3,6 +3,7 @@ import pytest
 
 from conftest import BODY, book
 from evilflowers_text.extraction import paragraphs, tables
+from evilflowers_worker.contract import Box, LayoutRegion
 
 
 def test_sentences_respect_abbreviations():
@@ -39,7 +40,23 @@ def test_paragraph_payload_is_what_the_catalog_ingests():
 
 def test_embedding_text_prefixes_the_section():
     first = paragraphs.extract(book(), min_words=10)[0]
-    assert first.embedding_text == f"Information\n{first.text}"
+    assert paragraphs.embedding_text(first) == f"Information\n{first.text}"
+    assert paragraphs.embedding_text(first.model_copy(update={"section": None})) == first.text
+
+
+@pytest.mark.parametrize(
+    ("outline", "sections"),
+    [
+        # Absent: the PDF's bookmarks, as before #15.
+        (None, ["Information", "Information", "Coding", "Coding"]),
+        # Present, even empty: authoritative.
+        ([], [None, None, None, None]),
+        ([(1, "Detected", 2)], [None, "Detected", "Detected", "Detected"]),
+        ([[1, "One", 1], [2, "One.Two", 1], [1, "Three", 3]], ["One.Two", "One.Two", "Three", "Three"]),
+    ],
+)
+def test_outline_from_the_analyzer_replaces_the_bookmarks(outline, sections):
+    assert [row.section for row in paragraphs.extract(book(), min_words=10, outline=outline)] == sections
 
 
 def test_short_paragraphs_are_dropped():
@@ -107,8 +124,6 @@ def ruled_table_pdf(tmp_path):
 
 
 def test_table_reader_crops_and_reads_a_ruled_table(tmp_path, ruled_table_pdf):
-    from evilflowers_text.schemas import Box, LayoutRegion
-
     reader = tables.TableReader(tmp_path, dpi=72, quality=50)
     box = Box(x0=0.15, y0=0.22, x1=0.8, y1=0.4)
     [region] = reader.read(ruled_table_pdf, "runs/1", [LayoutRegion(page=1, seq=3, bbox=box, caption="Table 1")])
@@ -119,8 +134,6 @@ def test_table_reader_crops_and_reads_a_ruled_table(tmp_path, ruled_table_pdf):
 
 
 def test_table_reader_skips_a_bad_region(tmp_path, ruled_table_pdf):
-    from evilflowers_text.schemas import Box, LayoutRegion
-
     reader = tables.TableReader(tmp_path, dpi=72, quality=50)
     box = Box(x0=0.1, y0=0.1, x1=0.5, y1=0.5)
     assert reader.read(ruled_table_pdf, "runs/1", [LayoutRegion(page=9, seq=0, bbox=box)]) == []

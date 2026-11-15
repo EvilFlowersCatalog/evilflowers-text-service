@@ -1,68 +1,42 @@
-"""Configuration of the worker: one typed object read from the environment (and `.env`).
+"""Configuration of the worker: the kit's ``WorkerSettings`` plus text's queues, table review, TEI and paragraphs.
 
-Every field keeps the environment variable name the deployments already set
-(``REDIS_URL``, ``TEXT_QUEUE``, ``CATALOG_API_KEY`` …), so the move from the
-two old modules (``settings.py`` and ``config/Config.py``) needs no change in
-the k8s manifests.
+The broker, delivery semantics (``WORKER_SOFT_SHUTDOWN_TIMEOUT``, ``WORKER_CANCEL_TIMEOUT``, ``MAX_DELIVERIES``),
+storage, the catalog ingestion API and logs come from ``evilflowers_worker.settings``. Every field keeps the
+environment variable name the deployments already set (``REDIS_URL``, ``TEXT_QUEUE``, ``CATALOG_API_KEY`` …), so the
+k8s manifests need no change for it.
 """
 
 from functools import lru_cache
-from pathlib import Path
 from typing import Annotated, Literal
 
 from pydantic import AliasChoices, Field, SecretStr, field_validator
-from pydantic_settings import BaseSettings, NoDecode, SettingsConfigDict
+from pydantic_settings import NoDecode
+
+from evilflowers_worker.settings import WorkerSettings
 
 #: The queue both jobs shared before issue #13. Still consumed by default, so messages already
 #: in it, or sent by an analyzer that predates the split, are not stranded.
 LEGACY_QUEUE = "evilflowers_text_worker"
 
 
-class Settings(BaseSettings):
-    model_config = SettingsConfigDict(env_file=".env", extra="ignore", frozen=True)
-
-    # -- Celery -------------------------------------------------------------------
-    redis_url: str = "redis://redis:6379/0"
+class Settings(WorkerSettings):
+    # -- Queues -----------------------------------------------------------------------------------
     #: Where each job is routed (issue #13): tables wait on the table review, paragraphs on the
     #: bulk embed lane, so each gets its own list and can be scaled on its own.
     #: `evilflowers.<service>[.<job>]`, the naming of knowledge#14.
     tables_queue: str = "evilflowers.text.tables"
     paragraphs_queue: str = "evilflowers.text.paragraphs"
     #: The queues this worker consumes, comma-separated (`TEXT_QUEUE`). Empty: both jobs' queues
-    #: and the legacy one. One Deployment per job sets just its own queue.
+    #: and the legacy one. One Deployment per job sets just its own.
     queues: Annotated[tuple[str, ...], NoDecode] = Field((), validation_alias=AliasChoices("TEXT_QUEUE", "QUEUE"))
-    #: Seconds a running job gets after SIGTERM before it is cancelled and its message goes back
-    #: to the queue (Celery soft shutdown). 0 cancels it at once. Needs a pool that can cancel a
-    #: task (prefork); under `--pool=solo` SIGTERM stays a warm shutdown (`worker.py`).
+
+    # -- Scale-in (issue #17) -----------------------------------------------------------------------
+    #: Seconds a SIGTERMed worker lets its job run on before it is cancelled and requeued. Short for
+    #: text: a book's paragraphs take minutes, and a copy resumes from scratch anyway. Plus
+    #: `WORKER_CANCEL_TIMEOUT` (30 s), it must stay under the pod's `terminationGracePeriodSeconds`.
     worker_soft_shutdown_timeout: float = Field(10.0, ge=0)
-    #: Wait the soft shutdown timeout even with no job running.
-    worker_enable_soft_shutdown_on_idle: bool = False
-    #: Seconds before Redis redelivers an unacknowledged message. Every consumer of a Redis db
-    #: restores *all* unacked messages older than its own timeout, in any queue, so this must
-    #: outlast the longest task of any service sharing the db, not only this one's
-    #: (an equation pass took over 2 h; EvilFlowersCatalog#120).
-    broker_visibility_timeout: int = 43200
 
-    # -- Storage and provenance -----------------------------------------------------
-    #: The catalog's storage root: originals are read here, crops written.
-    storage_path: Path = Path("/mnt/data")
-    #: Built into the image by CI; recorded in every run's provenance and as `service.version`.
-    image_tag: str = "dev"
-
-    # -- Catalog ingestion API (IP-018) ---------------------------------------------
-    catalog_api_url: str = "http://catalog:8000"
-    #: API key (bearer JWT) of the catalog user holding `extraction.ingest_extraction`.
-    catalog_api_key: SecretStr | None = None
-    #: Rows per request; keeps each body well under Django's 2.5 MB upload limit.
-    catalog_batch_size: int = 100
-    catalog_attempts: int = 4
-    catalog_timeout: float = 120.0
-
-    # -- Logs ---------------------------------------------------------------------------
-    #: `json` (one object per line, what Loki parses) or `text` (Celery's own format, for a terminal).
-    log_format: Literal["json", "text"] = "json"
-
-    # -- Region crops (tables) ------------------------------------------------------------
+    # -- Region crops (tables) ------------------------------------------------------------------------
     crop_dpi: int = 144
     webp_quality: int = 82
 
@@ -109,6 +83,9 @@ class Settings(BaseSettings):
     #: `similar` links per paragraph, and the cosine floor below which none is made.
     similar_links_k: int = 5
     similar_min_score: float = 0.6
+    #: Seconds between the re-reads of the run while a book is embedded (EvilFlowersCatalog#140):
+    #: a copy whose attempt was superseded stops within this long instead of embedding the whole book.
+    run_recheck_interval: float = Field(60.0, gt=0)
 
     @field_validator("queues", mode="before")
     @classmethod
@@ -127,10 +104,6 @@ class Settings(BaseSettings):
     def _empty_lane_is_none(cls, value: object) -> object:
         """`TEI_LANE=` (as `.env.sample` and manifests may leave it) means no lane."""
         return None if isinstance(value, str) and not value.strip() else value
-
-    def source_path(self, source: str) -> Path:
-        """Absolute path of a file the catalog names relative to its storage root."""
-        return self.storage_path / source
 
 
 @lru_cache

@@ -26,6 +26,9 @@ slowest batch, concurrency and serving lane as attributes; the requests inside i
 traced (a book is hundreds of batches, and per-batch spans pushed one task past Tempo's
 per-trace limit, issue #10). Per-batch timings are the `text.embedding.duration` histogram.
 
+A caller may pass `between`, called on the calling thread after every batch that comes back: the
+paragraphs job re-reads its run there and stops a superseded copy mid-book (EvilFlowersCatalog#140).
+
 Callers depend on the `Encoder` protocol; the jobs never see HTTP.
 """
 
@@ -43,11 +46,12 @@ import numpy as np
 import requests
 from requests.adapters import DEFAULT_POOLSIZE, HTTPAdapter
 
-from evilflowers_text.clients.catalog import batches
-from evilflowers_text.clients.http import session
+from evilflowers_text import metrics
 from evilflowers_text.extraction.paragraphs import sentences
-from evilflowers_text.observability import annotate, metrics, span, untraced_http
 from evilflowers_text.settings import Settings, get_settings
+from evilflowers_worker.catalog import batches
+from evilflowers_worker.http import session
+from evilflowers_worker.observability import annotate, span, untraced_http
 
 logger = logging.getLogger(__name__)
 
@@ -66,7 +70,7 @@ class Encoder(Protocol):
         """The model's identity, recorded in the run's provenance."""
         ...
 
-    def documents(self, texts: Sequence[str]) -> list[Vector]: ...
+    def documents(self, texts: Sequence[str], *, between: Callable[[], None] | None = None) -> list[Vector]: ...
 
 
 @dataclass
@@ -302,8 +306,13 @@ class TeiEncoder:
         tally.embedded(len(batch), seconds)
         return response.json()
 
-    def _run(self, texts: Sequence[str], tally: _Tally) -> tuple[list[list[str]], list[Vector]]:
-        """Every text's pieces, and every piece's vector in the same order; up to `concurrency` batches in flight."""
+    def _run(
+        self, texts: Sequence[str], tally: _Tally, between: Callable[[], None] | None = None
+    ) -> tuple[list[list[str]], list[Vector]]:
+        """Every text's pieces, and every piece's vector in the same order; up to `concurrency` batches in flight.
+
+        `between` runs after each answered batch; an exception from it ends the run (the batches in flight finish).
+        """
         schedule = _Schedule(list(self._batches(texts)), self.batch_size, prefer_embed=self.concurrency > 1)
         calls: dict[str, Callable[[list[str], _Tally], Any]] = {"tokenize": self._tokenize, "embed": self._embed}
         in_flight: dict[Future[Any], tuple[str, int]] = {}
@@ -320,8 +329,10 @@ class TeiEncoder:
                 for future in done:
                     # A batch that failed all its attempts fails the run; those in flight finish first.
                     schedule.answered(*in_flight.pop(future), future.result())
+                if between is not None:
+                    between()
 
-    def documents(self, texts: Sequence[str]) -> list[Vector]:
+    def documents(self, texts: Sequence[str], *, between: Callable[[], None] | None = None) -> list[Vector]:
         """One normalized vector per text; a split text gets the normalized mean of its pieces."""
         if not texts:
             return []
@@ -333,7 +344,7 @@ class TeiEncoder:
         tally = _Tally(concurrency=self.concurrency)
         with span("embeddings.documents", **attributes), untraced_http():
             try:
-                pieces, flat = self._run(texts, tally)
+                pieces, flat = self._run(texts, tally, between)
                 split_count = sum(1 for parts in pieces if len(parts) > 1)
                 if split_count:
                     logger.info("Split %d of %d texts longer than the model's input length", split_count, len(texts))

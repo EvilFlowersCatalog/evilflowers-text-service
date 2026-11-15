@@ -7,6 +7,37 @@ All notable changes to this project are documented here. The format follows
 
 ### Changed
 
+- The runtime is now the shared [evilflowers-worker](https://github.com/EvilFlowersCatalog/evilflowers-worker) kit,
+  pinned to `c37d860`. Its job protocol (`LeafJob`), catalog client, contract models, Celery app (`create_app`),
+  delivery cap, shutdown and telemetry replace the copies in this repository: `observability/`, `clients/`,
+  `schemas.py`, `jobs.ExtractionJob`, `retry_on_worker_lost` / `report_lost_job` and `requeue_on_sigterm` are gone.
+  Both task bodies are `runtime.run_job(...)`. A message that does not validate is reported `failed` and never
+  retried. ([#16](https://github.com/EvilFlowersCatalog/evilflowers-text-service/issues/16))
+- Jobs take `attempt` and `job`. Every write carries `?attempt=`. A job reads its run before the work and again every
+  `RUN_RECHECK_INTERVAL` (60 s) while a book is embedded, and stops as `superseded` when a later `/start` has begun a
+  new attempt. A `tables` task with `job="tables:0001-0008"` reports under that batch's name, and without `job` under
+  `tables`, as before. This lets the analyzer turn `DISPATCH_PER_BATCH` on once image and equation report per batch
+  too. ([#14](https://github.com/EvilFlowersCatalog/evilflowers-text-service/issues/14),
+  [#16](https://github.com/EvilFlowersCatalog/evilflowers-text-service/issues/16))
+- Paragraph sections come from the analyzer's `outline` kwarg when it is present, even when it is `[]`, and from the
+  PDF's bookmarks otherwise. Books without bookmarks now get sections from the headings the analyzer detects.
+  `provenance.paragraphs.outline` records which source was used (`analyzer` | `bookmarks`).
+  ([#15](https://github.com/EvilFlowersCatalog/evilflowers-text-service/issues/15))
+- Scale-in is the kit's `evilflowers_worker.shutdown`. SIGTERM stays a warm shutdown, so a job that finishes in time
+  is acknowledged and not redone. After `WORKER_SOFT_SHUTDOWN_TIMEOUT` (default still 10 s) the job is cancelled and
+  requeued. If the kill is denied, the worker restores the message itself after `WORKER_CANCEL_TIMEOUT` (30 s) and
+  exits. `WORKER_ENABLE_SOFT_SHUTDOWN_ON_IDLE` is no longer read, and `REMAP_SIGTERM` must not be set.
+  ([#17](https://github.com/EvilFlowersCatalog/evilflowers-text-service/issues/17))
+- A job whose worker process dies is requeued as many times as `MAX_DELIVERIES` (default 5) allows, counted in Redis
+  across container restarts, and then reported `failed`. Before, the limit was 2 Celery retries 60 s apart, and it
+  only covered a killed child. ([#16](https://github.com/EvilFlowersCatalog/evilflowers-text-service/issues/16))
+- Settings inherited from the kit: `REDIS_URL` now defaults to db 7 (was db 0; every deployment sets it),
+  `BROKER_VISIBILITY_TIMEOUT` must be at least 3600, and `CATALOG_BATCH_SIZE` at most 1000. A 409 `duplicate` from
+  the catalog is now reported `failed` instead of being dropped as `not_running`.
+- Telemetry: `text_job_outcome_total` gains outcome `superseded`, and `text_deliveries_capped_total` is new.
+  `text_catalog_retries_total` is now labelled `route` (`/jobs`, `/paragraphs` …) instead of `path`. Log lines
+  carry `attempt`, `task_id` and `delivery`.
+
 - Each job has its own queue: `tables` → `evilflowers.text.tables` (`TABLES_QUEUE`), `paragraphs` →
   `evilflowers.text.paragraphs` (`PARAGRAPHS_QUEUE`), each on a direct exchange of the same name.
   The names follow the `evilflowers.<service>` scheme of

@@ -13,8 +13,12 @@ it).
 
 | Task | Queue | Sent by | Does |
 |---|---|---|---|
-| `evilflowers_text_worker.tables` | `evilflowers.text.tables` (`TABLES_QUEUE`) | analyzer, kwargs `run_id, source, output_dir, regions` | Reads the analyzer's table regions with pdfplumber into markdown and writes a WebP crop of each. Posts them to `/regions` with `printed_caption` and position. |
-| `evilflowers_text_worker.paragraphs` | `evilflowers.text.paragraphs` (`PARAGRAPHS_QUEUE`) | analyzer, kwargs `run_id, source, output_dir` | Builds the paragraph index: paragraphs, sentence offsets and quads, section, one 1024-d embedding each, and `next`/`similar` links. Posts it to `/paragraphs`. |
+| `evilflowers_text_worker.tables` | `evilflowers.text.tables` (`TABLES_QUEUE`) | analyzer, kwargs `run_id, source, output_dir, regions`, optional `attempt`, `job` (a batch: `tables:0001-0008`) | Reads the analyzer's table regions with pdfplumber into markdown and writes a WebP crop of each. Posts them to `/regions` with `printed_caption` and position. |
+| `evilflowers_text_worker.paragraphs` | `evilflowers.text.paragraphs` (`PARAGRAPHS_QUEUE`) | analyzer, kwargs `run_id, source, output_dir`, optional `attempt`, `outline` | Builds the paragraph index: paragraphs, sentence offsets and quads, section, one 1024-d embedding each, and `next`/`similar` links. Posts it to `/paragraphs`. |
+
+The kwargs are the shared contract's `RegionsJob` and `ParagraphsJob`
+([evilflowers-worker](https://github.com/EvilFlowersCatalog/evilflowers-worker) `contract.py`). Unknown kwargs are
+ignored. A message that does not validate is reported `failed` and never retried.
 
 Each job has its own queue (issue #13): tables wait on the table review, paragraphs on the bulk embed lane, and in
 one shared queue a slow table review held up every paragraph task behind it. Two lists also let each job be scaled
@@ -29,27 +33,44 @@ The search-service tasks (`process_pdf`, `delete_document`, `stats`) and the rea
 `/extraction/v1/runs/{run_id}/…` API with `CATALOG_API_KEY`. That key belongs to a catalog user holding
 `extraction.ingest_extraction`.
 
+The runtime is the shared [evilflowers-worker](https://github.com/EvilFlowersCatalog/evilflowers-worker) kit (issue
+#16), pinned to a commit in `pyproject.toml`. It owns the job protocol, the catalog client, the contract, the Celery
+app, the delivery cap, the scale-in shutdown and the telemetry. Its `docs/architecture.md` is the design. This
+repository holds only the domain: table reading, paragraph segmentation, the TEI client and the table review.
+
 - **Every job reports `done` or `failed`**, because a run finishes only when all of its declared jobs have reported
-  (`jobs.ExtractionJob.run`).
-- **A 409 is the exception.** The catalog no longer accepts the run, or already holds these paragraphs, and the job
-  then stops quietly.
+  (`evilflowers_worker.jobs.LeafJob.run`).
+- **Each job reports under its own name.** That is the message's `job` when it names a batch (`tables:0001-0008`,
+  when the analyzer runs with `DISPATCH_PER_BATCH`), and the kind (`tables`, `paragraphs`) otherwise.
+- **Each job works for one attempt** (#14, EvilFlowersCatalog#140). The analyzer passes the run's `attempt` from
+  `/start`, and every write carries it as `?attempt=`. The catalog refuses the writes of a superseded attempt with
+  409 `superseded`. The job then reports `superseded` (the catalog counts these) and is never retried.
+- **A 409 `not_running` stops the job quietly**: the catalog no longer accepts the run. A 409 `duplicate` (the run
+  already holds these paragraphs) is reported `failed`, since the run still waits for the job.
 - **Copies stop before the work** (issue #12). A job can arrive twice for one run: the analyzer's own task may be
   redelivered and dispatch every job again, or a message comes back after a worker died. Before reading the PDF, a
-  job reads its run (`GET /extraction/v1/runs/{run_id}`). It goes on only while the run is `running` and its own
-  job is `pending`. Otherwise it logs why, posts nothing, and records outcome `not_running` or `already_done`. A
-  copy costs one request instead of embedding the book again only to get a 409 at the end. If that read fails, the
-  job is reported `failed` like any other error.
-- **Late acknowledgement.** The jobs acknowledge their messages late, so a worker that dies mid-book has the book
-  redelivered. Under prefork a job runs in a child process. If only the child dies (an OOM on a large book), the
-  job is sent again after 60 s, up to 2 times (`tasks.extraction.LOST_RETRIES`). After that it is reported `failed`,
-  so a book that always kills the worker neither loops nor leaves its run waiting.
-- **SIGTERM requeues the running job** (issue #13). The image runs `--pool=prefork --concurrency=1`, still one job
-  at a time. On SIGTERM (a scale-in, a rollout), the job gets `WORKER_SOFT_SHUTDOWN_TIMEOUT` seconds (default 10)
-  to finish. After that it is cancelled, and Redis has its message back at once instead of after the visibility
-  timeout (12 h). This is Celery's soft shutdown, with SIGTERM made a cold shutdown (`worker.requeue_on_sigterm`,
-  the same as `REMAP_SIGTERM=SIGQUIT`). Under `--pool=solo` SIGTERM stays a warm shutdown: solo cannot cancel a
-  task, and the failed cancel would get the message acknowledged and lost. A job cancelled in the middle of posting
-  paragraphs leaves part of them stored, and its copy is then refused with 409.
+  job reads its run (`GET /extraction/v1/runs/{run_id}`). It goes on only while the run is `running` at its
+  attempt and its own job is `pending`. Otherwise it records outcome `not_running`, `already_done` or `superseded`,
+  and posts nothing. While a book is embedded, the job reads the run again every `RUN_RECHECK_INTERVAL` seconds
+  (default 60), so a copy superseded mid-book stops within a minute instead of embedding the whole book.
+- **Late acknowledgement and a delivery cap.** The jobs acknowledge their messages late, and a message whose worker
+  process dies (an OOM, or the whole container) is requeued. Every delivery is counted in Redis. Past
+  `MAX_DELIVERIES` (default 5) the job is reported `failed` instead of run again, so a book that always kills the
+  worker neither loops nor leaves its run waiting.
+- **Scale-in requeues the running job** (#17). The image runs `--pool=prefork --concurrency=1`, still one job at a
+  time; solo cannot cancel a task. SIGTERM is Celery's warm shutdown: a job that finishes is acknowledged, and an
+  idle worker exits at once. After `WORKER_SOFT_SHUTDOWN_TIMEOUT` (default 10 s) the worker cancels the job, and
+  Redis has its message back at once. If the cancel has not stopped it after `WORKER_CANCEL_TIMEOUT` (30 s), the
+  worker restores the message itself and exits. A deliberate requeue does not count towards the delivery cap. Do
+  not set `REMAP_SIGTERM`. A job cancelled in the middle of posting paragraphs leaves part of them stored. Its copy
+  then gets 409 `duplicate` and is reported `failed`.
+
+### Sections
+
+A paragraph's `section` is the innermost outline heading in force on its page (#15). The outline is the analyzer's
+`outline` kwarg when it sends one: the bookmarks, or headings it detected on the text layer of a book without any.
+The kwarg is authoritative even when it is `[]`. Without it (an older analyzer), the PDF's bookmarks are read. The
+run's `provenance.paragraphs.outline` says which: `analyzer` or `bookmarks`.
 
 ## Embeddings
 
@@ -77,16 +98,18 @@ The search-service tasks (`process_pdf`, `delete_document`, `stats`) and the rea
 
 ```
 src/evilflowers_text/
-├── worker.py          Celery app (`celery -A evilflowers_text.worker worker`), config and routes
-├── settings.py        typed settings from the environment (pydantic-settings)
-├── schemas.py         messages received and payloads the catalog ingests (mirror of its forms)
-├── jobs.py            the IP-018 job protocol (extract → publish → report) and the tables/paragraphs jobs
+├── worker.py          Celery app (`celery -A evilflowers_text.worker worker`): the kit's create_app, queues, routes
+├── settings.py        the kit's WorkerSettings plus queues, table review, TEI and paragraph settings
+├── jobs.py            TablesJob and ParagraphsJob: the kit's LeafJob (extract, publish, provenance)
 ├── embeddings.py      `Encoder` protocol; the tei-embed client (batching, long-paragraph split, retries, concurrency)
-├── tasks/             thin Celery adapters for the extraction jobs
-├── extraction/        paragraphs, tables, page geometry and crops
-├── clients/           catalog ingestion API, shared HTTP session
-└── observability/     OpenTelemetry setup, spans, metrics, JSON logs, Pyroscope profiling, Celery signal wiring
+├── metrics.py         text's own instruments (embeddings, paragraphs, tables), beside the kit's standard set
+├── tasks/             the task bodies: `runtime.run_job(...)`
+└── extraction/        paragraphs, tables, table review, page geometry and crops
 ```
+
+Tests use the kit's doubles: `FakeCatalog` in process, and `StubCatalogServer` + `WorkerProcess` for one real
+prefork worker of the production app against Redis (`tests/test_end_to_end.py`). That test needs `TEST_REDIS_URL`
+(default `redis://localhost:6379/15`). Without Redis it is skipped, and in CI it fails.
 
 ## Development
 
@@ -110,7 +133,8 @@ defaults and meaning. The ones a deployment sets:
 
 - `REDIS_URL`
 - `TEXT_QUEUE`, only for a Deployment that runs one job: `evilflowers.text.tables` or `evilflowers.text.paragraphs`
-- `WORKER_SOFT_SHUTDOWN_TIMEOUT`, below the pod's termination grace period
+- `WORKER_SOFT_SHUTDOWN_TIMEOUT` (10–30 s) and `WORKER_CANCEL_TIMEOUT` (30 s): their sum below the pod's
+  `terminationGracePeriodSeconds`. No `REMAP_SIGTERM`.
 - `STORAGE_PATH`, the catalog's storage root, mounted read/write
 - `CATALOG_API_URL` and `CATALOG_API_KEY`
 - `TEI_URL` (default `http://tei-embed.shared.svc.cluster.local`) and `TEI_API_KEY` (1Password
@@ -135,15 +159,17 @@ The service follows the cluster's telemetry contract (knowledge base, `Cookbooks
   telemetry is off.
 - **Metrics** (Mimir):
   - `text_task_duration_seconds`
-  - `text_job_outcome_total{job,outcome}` (`done`, `failed`, `not_running`, `already_done`)
+  - `text_job_outcome_total{job,outcome}` (`done`, `failed`, `not_running`, `already_done`, `superseded`; `job` is
+    the kind, never a batch name)
+  - `text_deliveries_capped_total`
   - `text_embedding_duration_seconds{kind,model,lane}`, `text_embedding_inputs_total{kind,model,lane}` (`lane` when
     the router answers `x-embed-lane`)
   - `text_document_paragraphs`
   - `text_tables_regions_total{markdown}`
-  - `text_catalog_retries_total`
+  - `text_catalog_retries_total{route,reason}`
   - process CPU and memory
 - **Logs.** Each log line is one JSON object on stdout, carrying `level`, `trace_id`/`span_id`, `task_name`/`task_id`,
-  and the task's `run_id`, `job`, `entry_id` and `source`.
+  and the job's `run_id`, `job`, `attempt`, `source`, `task_id` and `delivery`.
 - **Profiles** (Pyroscope). The node's eBPF profiler cannot unwind Python on k3s `control`, so the worker profiles
   itself with the Pyroscope SDK (the `profiling` extra) when `PYROSCOPE_SERVER_ADDRESS` is set:
   `PYROSCOPE_APPLICATION_NAME` (`text`) and `PYROSCOPE_TAGS` (`k=v` pairs separated by commas). It runs in the

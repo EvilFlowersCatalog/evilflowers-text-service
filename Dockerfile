@@ -16,7 +16,8 @@ ENV UV_COMPILE_BYTECODE=1 \
 
 WORKDIR /app
 
-# Dependencies first (cached while only the code changes).
+# Dependencies first (cached while only the code changes). The worker kit (evilflowers-worker) comes from its
+# public git repository at the commit uv.lock pins (hence `git` above).
 RUN --mount=type=cache,target=/root/.cache/uv \
     --mount=type=bind,source=uv.lock,target=uv.lock \
     --mount=type=bind,source=pyproject.toml,target=pyproject.toml \
@@ -39,7 +40,8 @@ ENV PATH=/app/.venv/bin:$PATH \
     IMAGE_TAG=${IMAGE_TAG}
 
 # No model in the image or the process: paragraphs are embedded by the shared tei-embed (TEI_URL).
-# Prefork with one child: still one job at a time, but SIGTERM can cancel it and requeue the message
-# (solo cannot; worker.requeue_on_sigterm). No --queues: TEXT_QUEUE picks them (default both + legacy).
+# Prefork with one child: still one job at a time, but a stopped worker can cancel it and requeue the message (solo
+# cannot). No REMAP_SIGTERM: SIGTERM stays Celery's warm shutdown, and the kit's `evilflowers_worker.shutdown` turns it
+# cold after WORKER_SOFT_SHUTDOWN_TIMEOUT (#17). No --queues: TEXT_QUEUE picks them (default both + legacy).
 CMD ["celery", "-A", "evilflowers_text.worker", "worker", "--loglevel=INFO", "-E", \
      "--pool=prefork", "--concurrency=1"]

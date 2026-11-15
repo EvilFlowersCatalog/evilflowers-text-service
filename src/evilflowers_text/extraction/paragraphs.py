@@ -6,6 +6,10 @@ equations. Each paragraph keeps its page and box, its sentences as character
 offsets with their quads, and the outline heading it falls under. Running
 heads and footers, page numbers, short fragments and table-of-contents
 boilerplate are dropped (tp2025 `_is_valid_paragraph`).
+
+The outline is the analyzer's when it sends one (issue #15): bookmarks, or headings
+it detected on the text layer of a book without any. Without it, the PDF's own
+bookmarks are read, as before.
 """
 
 import re
@@ -16,7 +20,7 @@ from dataclasses import dataclass, field
 import pymupdf
 
 from evilflowers_text.extraction.geometry import to_box
-from evilflowers_text.schemas import Paragraph, ParagraphLink, Sentence
+from evilflowers_worker.contract import OutlineEntry, Paragraph, ParagraphLink, Sentence
 
 #: tp2025 `_is_valid_paragraph` boilerplate.
 BOILERPLATE = ("table of contents", "obsah", "zoznam obrázkov", "zoznam tabuliek")
@@ -138,7 +142,12 @@ def sentences(text: str) -> list[tuple[int, int]]:
     return [(begin, end) for begin, end in spans if text[begin:end].strip()]
 
 
-def _sections(toc: list, page_count: int) -> list[str | None]:
+def embedding_text(paragraph: Paragraph) -> str:
+    """The paragraph with its section title prefixed, as monad-knowledge's chunker embeds it."""
+    return f"{paragraph.section}\n{paragraph.text}" if paragraph.section else paragraph.text
+
+
+def _sections(toc: Sequence[Sequence], page_count: int) -> list[str | None]:
     """The innermost outline heading in force on each page (index 0 is page 1)."""
     headings = sorted((page, order, title.strip()) for order, (_level, title, page, *_rest) in enumerate(toc))
     by_page: list[str | None] = []
@@ -163,11 +172,18 @@ def _running_heads(pages: list[list[_Block]], document: pymupdf.Document) -> set
     return {key for key, count in keys.items() if count >= threshold}
 
 
-def extract(document: pymupdf.Document, min_words: int) -> list[Paragraph]:
-    """Every paragraph of the document, in reading order, as the catalog ingests it (without embeddings)."""
+def extract(
+    document: pymupdf.Document, min_words: int, outline: Sequence[OutlineEntry] | None = None
+) -> list[Paragraph]:
+    """Every paragraph of the document, in reading order, as the catalog ingests it (without embeddings).
+
+    `outline`: `[[level, title, page], …]` (1-based pages), the shape of `get_toc(simple=True)`. When given, even
+    empty, it is authoritative; `None` reads the document's bookmarks.
+    """
     pages = [_blocks(page, index + 1) for index, page in enumerate(document)]
     running = _running_heads(pages, document)
-    sections = _sections(document.get_toc(simple=True), len(pages))
+    toc = document.get_toc(simple=True) if outline is None else outline
+    sections = _sections(toc, len(pages))
 
     result: list[Paragraph] = []
     for index, blocks in enumerate(pages):

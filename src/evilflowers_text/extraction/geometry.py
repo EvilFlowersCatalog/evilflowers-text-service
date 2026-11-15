@@ -11,7 +11,7 @@ from pathlib import Path
 import pymupdf
 from PIL import Image
 
-from evilflowers_text.schemas import Box
+from evilflowers_worker.contract import Box
 
 
 def _clamp(value: float) -> float:

@@ -45,6 +45,15 @@ jobs:
     concurrency:
       group: text-test-${{ github.ref }}
       cancel-in-progress: true
+    # A real broker for tests/test_end_to_end.py (a prefork worker of the production app); with CI set, a missing
+    # Redis fails those tests instead of skipping them.
+    services:
+      redis:
+        image: redis:7
+        ports:
+          - 6379:6379
+    env:
+      TEST_REDIS_URL: redis://localhost:6379/15
     steps:
       - uses: actions/checkout@v4
       - uses: astral-sh/setup-uv@v6

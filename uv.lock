@@ -247,15 +247,61 @@ name = "evilflowers-text-service"
 version = "1.0.0"
 source = { editable = "." }
 dependencies = [
-    { name = "celery", extra = ["redis"] },
+    { name = "evilflowers-worker" },
     { name = "numpy" },
-    { name = "opentelemetry-api" },
     { name = "pdfplumber" },
     { name = "pillow" },
+    { name = "pymupdf" },
+    { name = "requests" },
+]
+
+[package.optional-dependencies]
+otel = [
+    { name = "evilflowers-worker", extra = ["otel"] },
+]
+profiling = [
+    { name = "evilflowers-worker", extra = ["profiling"] },
+]
+
+[package.dev-dependencies]
+dev = [
+    { name = "opentelemetry-sdk" },
+    { name = "pytest" },
+    { name = "ruff" },
+    { name = "watchdog", extra = ["watchmedo"] },
+]
+
+[package.metadata]
+requires-dist = [
+    { name = "evilflowers-worker", git = "https://github.com/EvilFlowersCatalog/evilflowers-worker?rev=c37d860513662adcb85794adabea39af456ffee8" },
+    { name = "evilflowers-worker", extras = ["otel"], marker = "extra == 'otel'", git = "https://github.com/EvilFlowersCatalog/evilflowers-worker?rev=c37d860513662adcb85794adabea39af456ffee8" },
+    { name = "evilflowers-worker", extras = ["profiling"], marker = "extra == 'profiling'", git = "https://github.com/EvilFlowersCatalog/evilflowers-worker?rev=c37d860513662adcb85794adabea39af456ffee8" },
+    { name = "numpy", specifier = ">=2" },
+    { name = "pdfplumber", specifier = ">=0.11" },
+    { name = "pillow", specifier = ">=11" },
+    { name = "pymupdf", specifier = ">=1.26" },
+    { name = "requests", specifier = ">=2.32" },
+]
+provides-extras = ["otel", "profiling"]
+
+[package.metadata.requires-dev]
+dev = [
+    { name = "opentelemetry-sdk", specifier = "==1.45.2" },
+    { name = "pytest", specifier = ">=8.3" },
+    { name = "ruff", specifier = ">=0.14" },
+    { name = "watchdog", extras = ["watchmedo"], specifier = ">=6" },
+]
+
+[[package]]
+name = "evilflowers-worker"
+version = "0.1.0"
+source = { git = "https://github.com/EvilFlowersCatalog/evilflowers-worker?rev=c37d860513662adcb85794adabea39af456ffee8#c37d860513662adcb85794adabea39af456ffee8" }
+dependencies = [
+    { name = "celery", extra = ["redis"] },
+    { name = "opentelemetry-api" },
     { name = "pydantic" },
     { name = "pydantic-settings" },
-    { name = "pymupdf" },
-    { name = "python-dotenv" },
+    { name = "redis" },
     { name = "requests" },
 ]
 
@@ -270,44 +316,6 @@ otel = [
 profiling = [
     { name = "pyroscope-io" },
     { name = "pyroscope-otel" },
-]
-
-[package.dev-dependencies]
-dev = [
-    { name = "opentelemetry-sdk" },
-    { name = "pytest" },
-    { name = "ruff" },
-    { name = "watchdog", extra = ["watchmedo"] },
-]
-
-[package.metadata]
-requires-dist = [
-    { name = "celery", extras = ["redis"], specifier = ">=5.6,<6" },
-    { name = "numpy", specifier = ">=2" },
-    { name = "opentelemetry-api", specifier = "==1.45.2" },
-    { name = "opentelemetry-exporter-otlp-proto-http", marker = "extra == 'otel'", specifier = "==1.45.2" },
-    { name = "opentelemetry-instrumentation-celery", marker = "extra == 'otel'", specifier = "==0.66b2" },
-    { name = "opentelemetry-instrumentation-requests", marker = "extra == 'otel'", specifier = "==0.66b2" },
-    { name = "opentelemetry-instrumentation-system-metrics", marker = "extra == 'otel'", specifier = "==0.66b2" },
-    { name = "opentelemetry-sdk", marker = "extra == 'otel'", specifier = "==1.45.2" },
-    { name = "pdfplumber", specifier = ">=0.11" },
-    { name = "pillow", specifier = ">=11" },
-    { name = "pydantic", specifier = ">=2.12,<3" },
-    { name = "pydantic-settings", specifier = ">=2.6,<3" },
-    { name = "pymupdf", specifier = ">=1.26" },
-    { name = "pyroscope-io", marker = "extra == 'profiling'", specifier = "==1.4.0" },
-    { name = "pyroscope-otel", marker = "extra == 'profiling'", specifier = "==1.1.0" },
-    { name = "python-dotenv", specifier = ">=1.0" },
-    { name = "requests", specifier = ">=2.32" },
-]
-provides-extras = ["otel", "profiling"]
-
-[package.metadata.requires-dev]
-dev = [
-    { name = "opentelemetry-sdk", specifier = "==1.45.2" },
-    { name = "pytest", specifier = ">=8.3" },
-    { name = "ruff", specifier = ">=0.14" },
-    { name = "watchdog", extras = ["watchmedo"], specifier = ">=6" },
 ]
 
 [[package]]

@@ -1,153 +1,61 @@
-"""IP-018 extraction jobs: read one PDF, post the results to the catalog, report the job.
+"""The two IP-018 leaf jobs of text: read one PDF and post the results to the catalog.
 
-The analyzer dispatches the jobs and declares them at the run's `/start`; the
-run finishes only when every declared job has reported `done` or `failed`. So
-a job never ends silently: whatever goes wrong is reported to the catalog,
-unless the catalog itself refused the run (409, `RunNotRunning`).
-
-`ExtractionJob.run` is that protocol, once. A job only says how it extracts,
-what it publishes and what provenance it records.
-
-A job may arrive more than once for a run: the analyzer's own task can be
-redelivered and dispatch the jobs again, or a message can come back after a
-worker died. So before the work a job reads its run, and does nothing unless the
-run is `running` and still waits for this job (issue #12). Otherwise a copy would
-embed a whole book again only to be refused with 409 at the end.
+The lifecycle is the kit's ``evilflowers_worker.jobs.LeafJob.run`` (issue #16): the delivery cap, the read of the
+run before the work (a copy, a run no longer running or a superseded attempt stops there), ``extract``, ``publish``
+with ``?attempt=``, and the terminal report, under the message's ``job`` when it names a batch
+(``tables:0001-0008``) and under the kind otherwise. Here a job only says how it extracts, what it publishes and what
+provenance it records.
 """
 
 import logging
-from abc import ABC, abstractmethod
-from collections.abc import Sequence
-from typing import Any, ClassVar, Literal
+from typing import Any
 
 import pymupdf
-from pydantic import TypeAdapter
 
-from evilflowers_text import embeddings
-from evilflowers_text.clients.catalog import CatalogClient, RunNotRunning
+from evilflowers_text import embeddings, metrics
 from evilflowers_text.embeddings import Encoder
 from evilflowers_text.extraction import paragraphs
 from evilflowers_text.extraction.table_review import TableReviewer
 from evilflowers_text.extraction.tables import TableReader
-from evilflowers_text.observability import bind, fail, metrics, span
-from evilflowers_text.schemas import JobReport, LayoutRegion, Paragraph, ParagraphLink, Region
-from evilflowers_text.settings import Settings, get_settings
+from evilflowers_text.settings import Settings
+from evilflowers_worker import contract
+from evilflowers_worker.contract import Paragraph, ParagraphLink, Region, RegionsJob
+from evilflowers_worker.jobs import LeafJob
+from evilflowers_worker.observability import span
 
 logger = logging.getLogger(__name__)
 
-#: `not_running`: the run no longer accepts results; `already_done`: the job reported before (a copy).
-Outcome = Literal["done", "failed", "not_running", "already_done"]
+ParagraphIndex = tuple[list[Paragraph], list[ParagraphLink]]
 
 
-class ExtractionJob[Result](ABC):
-    #: The job's name in the catalog (`/jobs/<name>`, `run.provenance[<name>]`).
-    name: ClassVar[str]
-
-    def __init__(
-        self, run_id: str, source: str, *, settings: Settings | None = None, catalog: CatalogClient | None = None
-    ):
-        self.settings = settings or get_settings()
-        self.run_id = run_id
-        self.source = source
-        self.path = self.settings.source_path(source)
-        self.catalog = catalog or CatalogClient(run_id, settings=self.settings)
-
-    @abstractmethod
-    def extract(self) -> Result:
-        """Read the PDF. Raising fails the job."""
-
-    @abstractmethod
-    def publish(self, result: Result) -> None:
-        """Send the results to the catalog."""
-
-    def provenance(self) -> dict[str, Any]:
-        """What produced the results, stored as `run.provenance[<name>]`."""
-        return {"image": self.settings.image_tag}
-
-    def done(self, result: Result) -> None:  # noqa: B027 - an optional hook, not part of the contract
-        """Hook after the catalog accepted the job."""
-
-    def run(self) -> Outcome:
-        with bind(run_id=self.run_id, job=self.name, source=self.source):
-            try:
-                state = self.catalog.run()
-                if skip := state.skip_reason(self.name):
-                    logger.warning(
-                        "Skipping job %s for run %s: %s (run %s, job %s)",
-                        self.name,
-                        self.run_id,
-                        skip,
-                        state.status,
-                        state.jobs.get(self.name),
-                    )
-                    return self._outcome(skip)
-                result = self.extract()
-                self.publish(result)
-                self.catalog.job(self.name, JobReport(status="done", provenance=self.provenance()))
-            except RunNotRunning:
-                logger.warning("Run %s is not accepting results", self.run_id)
-                return self._outcome("not_running")
-            except Exception as error:
-                logger.exception("Job %s failed for run %s", self.name, self.run_id)
-                fail(error)
-                self._report_failure(error)
-                return self._outcome("failed")
-            self.done(result)
-            return self._outcome("done")
-
-    def report_failure(self, error: BaseException) -> Outcome:
-        """Report the job failed without running it: its worker process died on every try."""
-        with bind(run_id=self.run_id, job=self.name, source=self.source):
-            logger.error("Job %s for run %s lost its worker process: %s", self.name, self.run_id, error)
-            self._report_failure(error)
-            return self._outcome("failed")
-
-    def _report_failure(self, error: BaseException) -> None:
-        # Report it, or the run waits for this job forever.
-        report = JobReport(status="failed", error=f"{type(error).__name__}: {error}", provenance=self.provenance())
-        try:
-            self.catalog.job(self.name, report)
-        except RunNotRunning:
-            logger.warning("Run %s is not accepting results", self.run_id)
-        except Exception:
-            logger.exception("Could not report the failed %s job for run %s", self.name, self.run_id)
-
-    def _outcome(self, outcome: Outcome) -> Outcome:
-        metrics.record_job(self.name, outcome)
-        return outcome
-
-
-class TablesJob(ExtractionJob[list[Region]]):
+class TablesJob(LeafJob[RegionsJob, list[Region]]):
     """Table regions found by the analyzer's layout pass: markdown, printed caption, crop and position."""
 
-    name = "tables"
-    _regions = TypeAdapter(list[LayoutRegion])
+    kind = "tables"
+    settings: Settings
 
-    def __init__(self, run_id: str, source: str, output_dir: str, regions: Sequence[dict], **kwargs: Any):
-        super().__init__(run_id, source, **kwargs)
-        self.output_dir = output_dir
-        self.raw_regions = regions
+    def __init__(self, message: RegionsJob, *, settings: Settings, **kwargs: Any):
+        super().__init__(message, settings=settings, **kwargs)
         reviewer = None
-        if self.settings.table_review_enabled and self.settings.ollama_endpoint:
-            key = self.settings.ollama_api_key
+        if settings.table_review_enabled and settings.ollama_endpoint:
+            key = settings.ollama_api_key
             reviewer = TableReviewer(
-                self.settings.ollama_endpoint,
-                self.settings.table_review_model,
+                settings.ollama_endpoint,
+                settings.table_review_model,
                 api_key=key.get_secret_value() if key else None,
-                timeout=self.settings.table_review_timeout,
-                max_side=self.settings.table_review_max_side,
+                timeout=settings.table_review_timeout,
+                max_side=settings.table_review_max_side,
             )
         self.reader = TableReader(
-            self.settings.storage_path,
-            dpi=self.settings.crop_dpi,
-            quality=self.settings.webp_quality,
-            reviewer=reviewer,
+            settings.storage_path, dpi=settings.crop_dpi, quality=settings.webp_quality, reviewer=reviewer
         )
 
     def extract(self) -> list[Region]:
-        regions = self._regions.validate_python(self.raw_regions)
-        with span("tables.extract", **{"tables.regions": len(regions)}) as current:
-            kept = self.reader.read(self.path, self.output_dir, regions)
+        message = self.message
+        # The crops are written under `output_dir`: a path from the message must not leave the storage root.
+        self.settings.storage_file(message.output_dir)
+        with span("tables.extract", **{"tables.regions": len(message.regions)}) as current:
+            kept = self.reader.read(self.settings.source_path(message.source), message.output_dir, message.regions)
             if current is not None:
                 current.set_attribute("tables.kept", len(kept))
         return kept
@@ -159,13 +67,17 @@ class TablesJob(ExtractionJob[list[Region]]):
         return {**super().provenance(), **self.reader.versions(), "crop_dpi": self.settings.crop_dpi}
 
 
-class ParagraphsJob(ExtractionJob[tuple[list[Paragraph], list[ParagraphLink]]]):
+class ParagraphsJob(LeafJob[contract.ParagraphsJob, ParagraphIndex]):
     """The paragraph index (IP-018 Phase 2b): paragraphs, sentences, embeddings and links."""
 
-    name = "paragraphs"
+    kind = "paragraphs"
+    settings: Settings
 
-    def __init__(self, run_id: str, source: str, *, encoder: Encoder | None = None, **kwargs: Any):
-        super().__init__(run_id, source, **kwargs)
+    def __init__(
+        self, message: contract.ParagraphsJob, *, settings: Settings, encoder: Encoder | None = None, **kwargs: Any
+    ):
+        kwargs.setdefault("recheck_interval", settings.run_recheck_interval)
+        super().__init__(message, settings=settings, **kwargs)
         self._encoder = encoder
 
     @property
@@ -174,34 +86,42 @@ class ParagraphsJob(ExtractionJob[tuple[list[Paragraph], list[ParagraphLink]]]):
             self._encoder = embeddings.encoder()
         return self._encoder
 
-    def extract(self) -> tuple[list[Paragraph], list[ParagraphLink]]:
-        with span("paragraphs.extract") as current, pymupdf.open(self.path) as document:
-            rows = paragraphs.extract(document, self.settings.min_paragraph_words)
+    @property
+    def outline_source(self) -> str:
+        """Where the sections came from: the analyzer's outline (issue #15) or the PDF's bookmarks."""
+        return "bookmarks" if self.message.outline is None else "analyzer"
+
+    def extract(self) -> ParagraphIndex:
+        message = self.message
+        path = self.settings.source_path(message.source)
+        with span("paragraphs.extract") as current, pymupdf.open(path) as document:
+            rows = paragraphs.extract(document, self.settings.min_paragraph_words, message.outline)
             if current is not None:
                 current.set_attribute("paragraphs.count", len(rows))
+                current.set_attribute("paragraphs.outline", self.outline_source)
         if not rows:
             return [], []
-        vectors = self.encoder.documents([row.embedding_text for row in rows])
+        # Embedding a book takes minutes to hours: between batches, stop if the run moved on (#14, catalog#140).
+        vectors = self.encoder.documents([paragraphs.embedding_text(row) for row in rows], between=self.recheck)
         for row, vector in zip(rows, vectors, strict=True):
             row.embedding = vector
         with span("paragraphs.links", **{"paragraphs.count": len(vectors)}):
             links = paragraphs.links(vectors, self.settings.similar_links_k, self.settings.similar_min_score)
         return rows, links
 
-    def publish(self, result: tuple[list[Paragraph], list[ParagraphLink]]) -> None:
-        self.catalog.paragraphs(*result)
+    def publish(self, result: ParagraphIndex) -> None:
+        rows, links = result
+        self.catalog.paragraphs(rows, links)
+        metrics.PARAGRAPHS.record(len(rows))
+        logger.info("Run %s: %d paragraphs, %d links", self.message.run_id, len(rows), len(links))
 
     def provenance(self) -> dict[str, Any]:
+        base = {**super().provenance(), "outline": self.outline_source}
         # `model_id@model_sha`: the catalog never compares vectors of two models.
         try:
             model = self.encoder.name
         except Exception:
             # Also called to report a failure, often because tei-embed is down: that report must still go out.
-            logger.warning("Embedding model unknown for run %s", self.run_id, exc_info=True)
-            return super().provenance()
-        return {**super().provenance(), "embedding_model": model}
-
-    def done(self, result: tuple[list[Paragraph], list[ParagraphLink]]) -> None:
-        rows, links = result
-        metrics.PARAGRAPHS.record(len(rows))
-        logger.info("Run %s: %d paragraphs, %d links", self.run_id, len(rows), len(links))
+            logger.warning("Embedding model unknown for run %s", self.message.run_id, exc_info=True)
+            return base
+        return {**base, "embedding_model": model}

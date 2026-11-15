@@ -189,7 +189,7 @@ def spans(monkeypatch):
     from opentelemetry.sdk.trace.export import SimpleSpanProcessor
     from opentelemetry.sdk.trace.export.in_memory_span_exporter import InMemorySpanExporter
 
-    from evilflowers_text.observability import tracing
+    from evilflowers_worker.observability import tracing
 
     exporter = InMemorySpanExporter()
     provider = sdk.TracerProvider()
@@ -252,6 +252,26 @@ def test_no_texts_no_requests(tei_settings):
     http = FakeTei()
     assert TeiEncoder(settings=tei_settings, http=http).documents([]) == []
     assert http.calls == []
+
+
+def test_between_runs_after_every_batch_and_can_stop_the_call(tei_settings):
+    """The paragraphs job re-reads its run there (#14); what it raises ends the call, inside the one span."""
+    texts = [f"paragraph number {index}" for index in range(7)]
+    calls = []
+    TeiEncoder(settings=tei_settings, http=FakeTei()).documents(texts, between=lambda: calls.append(1))
+    # 3 /tokenize + 3 /embed batches of at most 3.
+    assert len(calls) == 6
+
+    class Stopped(Exception):
+        pass
+
+    def stop():
+        raise Stopped
+
+    http = FakeTei()
+    with pytest.raises(Stopped):
+        TeiEncoder(settings=tei_settings, http=http).documents(texts, between=stop)
+    assert [path for _method, path, _body in http.calls].count("/embed") == 0
 
 
 # -- Concurrency and lanes (issue #11) ---------------------------------------------------------------

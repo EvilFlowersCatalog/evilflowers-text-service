@@ -12,10 +12,10 @@ from pathlib import Path
 import pdfplumber
 import pymupdf
 
+from evilflowers_text import metrics
 from evilflowers_text.extraction import geometry
 from evilflowers_text.extraction.table_review import TableReviewer
-from evilflowers_text.observability import metrics
-from evilflowers_text.schemas import Box, LayoutRegion, Region
+from evilflowers_worker.contract import Box, LayoutRegion, Region
 
 logger = logging.getLogger(__name__)
 
