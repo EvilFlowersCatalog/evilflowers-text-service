@@ -35,6 +35,9 @@ ABBREVIATIONS = {
 _SENTENCE_END = re.compile(r"[.!?…]+[\"'»”’)\]]*$")
 _STARTS_SENTENCE = re.compile(r"^[\"'„“«(\[]*[A-ZÁÄČĎÉÍĹĽŇÓÔŔŠŤÚÝŽ0-9]")
 _DIGITS = re.compile(r"\d+")
+# C0 controls and DEL except \t and \n (those fold into spaces). A bookmark title stored as UTF-16 without its BOM
+# decodes with a NUL before every letter, and the catalog refuses NUL in `section` (Postgres text cannot hold it).
+_CONTROL = re.compile(r"[\x00-\x08\x0b-\x1f\x7f]")
 
 #: Share of the page height at the top and bottom where running heads live.
 MARGIN = 0.1
@@ -147,9 +150,17 @@ def embedding_text(paragraph: Paragraph) -> str:
     return f"{paragraph.section}\n{paragraph.text}" if paragraph.section else paragraph.text
 
 
+def _clean_title(title: str) -> str:
+    """An outline title without control characters, its whitespace collapsed; empty when nothing printable is left."""
+    return " ".join(_CONTROL.sub("", title).split())
+
+
 def _sections(toc: Sequence[Sequence], page_count: int) -> list[str | None]:
-    """The innermost outline heading in force on each page (index 0 is page 1)."""
-    headings = sorted((page, order, title.strip()) for order, (_level, title, page, *_rest) in enumerate(toc))
+    """The innermost outline heading in force on each page (index 0 is page 1).
+
+    Titles are cleaned whatever their source; one left empty is skipped, so the previous heading stays in force.
+    """
+    headings = sorted((page, order, _clean_title(title)) for order, (_level, title, page, *_rest) in enumerate(toc))
     by_page: list[str | None] = []
     current = None
     position = 0

@@ -107,6 +107,29 @@ def test_an_empty_outline_is_authoritative(settings, stored_book):
     assert all("section" not in row for row in catalog.paragraphs_posted)
 
 
+def test_control_characters_are_stripped_from_section_titles(settings, stored_book):
+    """Issue #18: a UTF-16 title without its BOM carries NULs, and the catalog refuses NUL in `section` (422)."""
+    seen = []
+
+    class Recording(FakeEncoder):
+        def documents(self, texts, *, between=None):
+            seen.extend(texts)
+            return super().documents(texts)
+
+    catalog = catalog_with()
+    outline = [[1, "Prologue", 1], [1, "\x00I\x00n\x00t\x00r\x00o\x7f\t", 2]]
+    assert paragraphs_job(settings, catalog, encoder=Recording(), outline=outline).run() == "done"
+    assert [row["section"] for row in catalog.paragraphs_posted] == ["Prologue", "Intro", "Intro", "Intro"]
+    assert not any("\x00" in text for text in seen)
+
+
+def test_a_title_of_only_control_characters_is_skipped(settings, stored_book):
+    catalog = catalog_with()
+    outline = [[1, "Prologue", 1], [1, "\x00\x00\x1f", 2]]
+    paragraphs_job(settings, catalog, outline=outline).run()
+    assert [row["section"] for row in catalog.paragraphs_posted] == ["Prologue"] * 4
+
+
 def test_section_prefixes_the_embedded_text(settings, stored_book):
     seen = []
 
