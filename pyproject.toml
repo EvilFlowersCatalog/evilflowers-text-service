@@ -22,7 +22,7 @@ profiling = ["evilflowers-worker[profiling]"]
 
 [tool.uv.sources]
 # Pinned to a commit of master; bump it deliberately.
-evilflowers-worker = { git = "https://github.com/EvilFlowersCatalog/evilflowers-worker", rev = "c37d860513662adcb85794adabea39af456ffee8" }
+evilflowers-worker = { git = "https://github.com/EvilFlowersCatalog/evilflowers-worker", rev = "8fc9c20f28aaf4b983989c7196d9b976709730db" }
 
 [dependency-groups]
 # `uv sync` installs the core and this group only.
