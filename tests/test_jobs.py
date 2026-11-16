@@ -1,14 +1,17 @@
 """The two leaf jobs on the kit's protocol: every declared job reports, under its own name, for its own attempt."""
 
+import json
 from urllib.parse import parse_qs, urlsplit
 
 import pytest
+import requests
 
 from conftest import book
 from evilflowers_text.jobs import ParagraphsJob, TablesJob
 from evilflowers_worker import contract
 from evilflowers_worker.catalog import CatalogClient
 from evilflowers_worker.contract import EMBEDDING_DIMENSIONS, RegionsJob
+from evilflowers_worker.judges import DeciderClient, Judges, Thresholds
 from evilflowers_worker.testing import FakeCatalog, StubCatalogServer, running
 
 PENDING = {"paragraphs": "pending", "tables": "pending", "figures": "done"}
@@ -265,6 +268,50 @@ def test_tables_copy_stops_before_the_work(settings, stored_book):
     job = TablesJob(tables_message(regions=[{"page": 9, "seq": 0, "bbox": box}]), settings=settings, catalog=catalog)
     assert job.run() == "already_done"
     assert catalog.regions_posted == [] and catalog.jobs == []
+
+
+class DeciderHttp:
+    """decider-vision behind the kit's client: answers every `is_table` with the same `noul`."""
+
+    def __init__(self, noul):
+        self.noul, self.calls = noul, 0
+
+    def post(self, url, **kwargs):
+        self.calls += 1
+        response = requests.Response()
+        response.status_code = 200
+        response._content = json.dumps({"answers": {"is_table": {"noul": self.noul}}, "model": "strands"}).encode()
+        return response
+
+
+def judged(settings, http, **update):
+    settings = settings.model_copy(update={"judges_enabled": True, "decider_vision_url": "http://dv", **update})
+    client = DeciderClient("decider-vision", "http://dv", vision=True, timeout=5, revision="216d1ccb", http=http)
+    return settings, Judges(decider=None, decider_vision=client, ollama=None, rerank=None, settings=settings)
+
+
+TABLE_REGION = {"page": 1, "seq": 0, "bbox": {"x0": 0.1, "y0": 0.1, "x1": 0.9, "y1": 0.5}}
+
+
+def test_tables_job_asks_the_judge_and_posts_the_decision(settings, stored_book):
+    settings, judges = judged(
+        settings, http := DeciderHttp(0.02), judge_thresholds={"is_table": Thresholds(keep=0.8, hide=0.9)}
+    )
+    catalog = catalog_with()
+    job = TablesJob(tables_message(regions=[TABLE_REGION]), settings=settings, catalog=catalog, judges=judges)
+    assert job.run() == "done"
+    [region] = catalog.regions_posted
+    assert http.calls == 1
+    assert region["band"] == "hide" and region["decision"] == "no" and region["p"] == pytest.approx(0.98)
+    assert region["decider_model"] == "strands@216d1ccb" and "score" not in region
+
+
+def test_tables_job_without_judges_posts_no_decision(settings, stored_book):
+    catalog = catalog_with()
+    job = TablesJob(tables_message(regions=[TABLE_REGION]), settings=settings, catalog=catalog)
+    assert job.run() == "done"
+    [region] = catalog.regions_posted
+    assert not {"band", "p", "score", "decision", "decider_model"} & region.keys()
 
 
 def test_an_output_dir_outside_the_storage_fails_the_job(settings, stored_book):

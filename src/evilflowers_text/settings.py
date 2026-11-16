@@ -1,4 +1,5 @@
-"""Configuration of the worker: the kit's ``WorkerSettings`` plus text's queues, table review, TEI and paragraphs.
+"""Configuration of the worker: the kit's ``WorkerSettings`` and ``JudgeSettings`` plus text's queues, table review,
+TEI and paragraphs.
 
 The broker, delivery semantics (``WORKER_SOFT_SHUTDOWN_TIMEOUT``, ``WORKER_CANCEL_TIMEOUT``, ``MAX_DELIVERIES``),
 storage, the catalog ingestion API and logs come from ``evilflowers_worker.settings``. Every field keeps the
@@ -12,6 +13,7 @@ from typing import Annotated, Literal
 from pydantic import AliasChoices, Field, SecretStr, field_validator
 from pydantic_settings import NoDecode
 
+from evilflowers_worker.judges import JudgeSettings
 from evilflowers_worker.settings import WorkerSettings
 
 #: The queue both jobs shared before issue #13. Still consumed by default, so messages already
@@ -19,7 +21,7 @@ from evilflowers_worker.settings import WorkerSettings
 LEGACY_QUEUE = "evilflowers_text_worker"
 
 
-class Settings(WorkerSettings):
+class Settings(WorkerSettings, JudgeSettings):
     # -- Queues -----------------------------------------------------------------------------------
     #: Where each job is routed (issue #13): tables wait on the table review, paragraphs on the
     #: bulk embed lane, so each gets its own list and can be scaled on its own.
@@ -53,6 +55,14 @@ class Settings(WorkerSettings):
     table_review_timeout: float = 300.0
     #: Longest side of the image sent to the model, in pixels.
     table_review_max_side: int = 1600
+
+    # -- Table decision (issue #20) ---------------------------------------------------------------
+    #: "Is this a data table?" goes to decider-vision through the kit's judges (`JudgeSettings`: `DECIDER_ENABLED`,
+    #: `DECIDER_VISION_URL`, `DECIDER_VISION_REVISION`, `DECIDER_TIMEOUT`, `JUDGE_THRESHOLDS` with `is_table`, the
+    #: budget and breaker). Its `hide` band skips the review. The table score's bands are text's own:
+    #: `hide_below,keep_from` on the table score, e.g. `0.4,0.7`. Unset (the default) until calibrated: the region
+    #: carries p and score but no band, and the catalog bands it once `EVILFLOWERS_DECIDER_BANDS` holds thresholds.
+    decider_table_bands: Annotated[tuple[float, float] | None, NoDecode] = None
 
     # -- Embeddings: the shared tei-embed (knowledge base, Cookbooks/Shared-Inference) ----------
     #: In k8s the Service; from Compose on gateway `http://192.168.122.227:8081` with `TEI_HOST`.
@@ -104,6 +114,22 @@ class Settings(WorkerSettings):
     def _empty_lane_is_none(cls, value: object) -> object:
         """`TEI_LANE=` (as `.env.sample` and manifests may leave it) means no lane."""
         return None if isinstance(value, str) and not value.strip() else value
+
+    @field_validator("decider_table_bands", mode="before")
+    @classmethod
+    def _split_bands(cls, value: object) -> object:
+        """`DECIDER_TABLE_BANDS=0.4,0.7`; empty means unset."""
+        if isinstance(value, str):
+            parts = [part.strip() for part in value.split(",") if part.strip()]
+            return tuple(parts) if parts else None
+        return value
+
+    @field_validator("decider_table_bands")
+    @classmethod
+    def _ordered_bands(cls, value: tuple[float, float] | None) -> tuple[float, float] | None:
+        if value is not None and not 0 <= value[0] <= value[1] <= 1:
+            raise ValueError("DECIDER_TABLE_BANDS is `hide_below,keep_from` with 0 <= hide_below <= keep_from <= 1")
+        return value
 
 
 @lru_cache

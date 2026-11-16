@@ -15,17 +15,29 @@ import pymupdf
 from evilflowers_text import embeddings, metrics
 from evilflowers_text.embeddings import Encoder
 from evilflowers_text.extraction import paragraphs
+from evilflowers_text.extraction.decider import TableDecider
 from evilflowers_text.extraction.table_review import TableReviewer
-from evilflowers_text.extraction.tables import TableReader
+from evilflowers_text.extraction.tables import Decision, TableReader
 from evilflowers_text.settings import Settings
 from evilflowers_worker import contract
 from evilflowers_worker.contract import Paragraph, ParagraphLink, Region, RegionsJob
 from evilflowers_worker.jobs import LeafJob
+from evilflowers_worker.judges import Judges
 from evilflowers_worker.observability import span
 
 logger = logging.getLogger(__name__)
 
 ParagraphIndex = tuple[list[Paragraph], list[ParagraphLink]]
+
+_judges: tuple[Settings, Judges] | None = None
+
+
+def process_judges(settings: Settings) -> Judges:
+    """The process's judge clients: their circuit breakers outlive one job, so they are built once per settings."""
+    global _judges
+    if _judges is None or _judges[0] is not settings:
+        _judges = (settings, Judges.from_settings(settings))
+    return _judges[1]
 
 
 class TablesJob(LeafJob[RegionsJob, list[Region]]):
@@ -34,7 +46,7 @@ class TablesJob(LeafJob[RegionsJob, list[Region]]):
     kind = "tables"
     settings: Settings
 
-    def __init__(self, message: RegionsJob, *, settings: Settings, **kwargs: Any):
+    def __init__(self, message: RegionsJob, *, settings: Settings, judges: Judges | None = None, **kwargs: Any):
         super().__init__(message, settings=settings, **kwargs)
         reviewer = None
         if settings.table_review_enabled and settings.ollama_endpoint:
@@ -46,8 +58,18 @@ class TablesJob(LeafJob[RegionsJob, list[Region]]):
                 timeout=settings.table_review_timeout,
                 max_side=settings.table_review_max_side,
             )
+        judges = judges or process_judges(settings)
+        decider = None
+        if judges.decider_vision is not None:
+            # One panel per job: it holds this job's budget of judge calls.
+            decider = TableDecider(judges.decider_vision, judges.panel())
         self.reader = TableReader(
-            settings.storage_path, dpi=settings.crop_dpi, quality=settings.webp_quality, reviewer=reviewer
+            settings.storage_path,
+            dpi=settings.crop_dpi,
+            quality=settings.webp_quality,
+            reviewer=reviewer,
+            decider=decider,
+            decision=Decision(settings.decider_table_bands),
         )
 
     def extract(self) -> list[Region]:

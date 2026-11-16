@@ -7,6 +7,19 @@ All notable changes to this project are documented here. The format follows
 
 ### Added
 
+- Table score and decision. With `DECIDER_ENABLED` and `DECIDER_VISION_URL`, decider-vision answers "is this a data
+  table?" from each crop before the Ollama review, through the kit's judges (`evilflowers-worker[judges]`: client,
+  circuit breaker, per-job budget, `text_judge_total`). An answer the kit bands `hide` (`JUDGE_THRESHOLDS`, question
+  `is_table`) skips the review and hides the region. Otherwise a table score (grounded share, grid quality, review
+  outcome, decider; deterministic signals weigh most) gives the band through `DECIDER_TABLE_BANDS`. Table regions now
+  post `band`, `p`, `decision`, `decider_model`, `score`, `review_outcome`, `grounded_share` and `signals`
+  (EvilFlowersCatalog#189). Thresholds are empty until calibrated (knowledge#65): until then no review is skipped and
+  no band is sent. With no answer the payload is unchanged. New counter `text_table_decision_total{band}`. The
+  evilflowers-worker kit is bumped to `e530f68`, whose `contract.Region` carries these fields
+  ([evilflowers-worker#7](https://github.com/EvilFlowersCatalog/evilflowers-worker/issues/7)) and which brings the
+  judges ([evilflowers-worker#6](https://github.com/EvilFlowersCatalog/evilflowers-worker/issues/6)); a blank
+  `JUDGE_THRESHOLDS=` means none ([evilflowers-worker#8](https://github.com/EvilFlowersCatalog/evilflowers-worker/issues/8)).
+  ([#20](https://github.com/EvilFlowersCatalog/evilflowers-text-service/issues/20))
 - The table review is measured. `TableReviewer.review` returns what it did: `kept`, `rewritten`, `transcribed`,
   `unusable` or `failed`. The new counter `text_table_review_total{outcome}` counts each outcome, and a
   `Table read` log line per table gives its page, outcome, grounded share and grid strategy, with the job's `run_id`.

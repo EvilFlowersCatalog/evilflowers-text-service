@@ -26,6 +26,12 @@ TABLES = Instrument(
 )
 #: ``outcome``: kept, rewritten, transcribed, unusable or failed (issue #19); ``text_table_review_total`` in Mimir.
 TABLE_REVIEWS = Instrument("counter", "{service}.table.review", "{table}", "Table reviews by the model, by outcome")
+#: ``band``: keep, review, hide, or none (answered, no thresholds) of a table the decider answered for (issue #20);
+#: ``text_table_decision_total`` in Mimir. The calls themselves, answered or not, are the kit's
+#: ``text_judge_total{question="is_table", outcome, band}``.
+TABLE_DECISIONS = Instrument(
+    "counter", "{service}.table.decision", "{table}", "Table regions by the band the decision gave them"
+)
 
 
 def record_embedding(kind: str, model: str, inputs: int, seconds: float, lane: str | None = None) -> None:

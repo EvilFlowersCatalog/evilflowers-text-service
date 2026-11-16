@@ -6,6 +6,7 @@ import pytest
 
 from evilflowers_text.settings import Settings, get_settings
 from evilflowers_text.worker import app
+from evilflowers_worker.judges import Judges
 
 TASKS = {
     "evilflowers_text_worker.tables": "evilflowers.text.tables",
@@ -79,6 +80,52 @@ def test_scale_in_settings_come_from_the_environment(monkeypatch):
     assert defaults.worker_soft_shutdown_timeout == 10 and defaults.worker_cancel_timeout == 30
     monkeypatch.setenv("WORKER_SOFT_SHUTDOWN_TIMEOUT", "25")
     assert Settings(_env_file=None).worker_soft_shutdown_timeout == 25
+
+
+DECIDER_ENV = (
+    "DECIDER_ENABLED",
+    "JUDGES_ENABLED",
+    "DECIDER_VISION_URL",
+    "DECIDER_TIMEOUT",
+    "JUDGE_THRESHOLDS",
+    "DECIDER_TABLE_BANDS",
+)
+
+
+def test_decider_settings_come_from_the_environment(monkeypatch):
+    """The kit's judge settings, under the names the cluster sets (Deploy-Decision-Models), plus text's bands."""
+    for name in DECIDER_ENV:
+        monkeypatch.delenv(name, raising=False)
+    defaults = Settings(_env_file=None)
+    assert not defaults.judges_enabled and defaults.decider_vision_url is None and defaults.decider_timeout == 60
+    assert defaults.judge_thresholds == {} and defaults.decider_table_bands is None
+    monkeypatch.setenv("DECIDER_ENABLED", "true")
+    monkeypatch.setenv("DECIDER_VISION_URL", "http://decider-vision.shared.svc.cluster.local")
+    monkeypatch.setenv("DECIDER_TIMEOUT", "90")
+    monkeypatch.setenv("JUDGE_THRESHOLDS", '{"is_table": {"keep": 0.8, "hide": 0.9}}')
+    monkeypatch.setenv("DECIDER_TABLE_BANDS", "0.4, 0.7")
+    settings = Settings(_env_file=None)
+    assert settings.judges_enabled and settings.decider_timeout == 90
+    assert settings.judge_thresholds["is_table"].hide == 0.9 and settings.decider_table_bands == (0.4, 0.7)
+    judges = Judges.from_settings(settings)
+    assert judges.decider_vision is not None and judges.decider_vision.url == settings.decider_vision_url
+    assert judges.decider is None and judges.ollama is None
+
+
+def test_an_empty_decider_env_is_off_not_a_crash(monkeypatch):
+    # A rollback (`decider.enabled: false`) leaves the variables in the pod, empty.
+    for name in DECIDER_ENV:
+        monkeypatch.setenv(name, "")
+    settings = Settings(_env_file=None)
+    assert not settings.judges_enabled and settings.decider_vision_url is None and settings.decider_timeout == 60
+    assert settings.judge_thresholds == {} and settings.decider_table_bands is None
+    assert Judges.from_settings(settings).decider_vision is None
+
+
+def test_decider_bands_must_be_ordered(monkeypatch):
+    monkeypatch.setenv("DECIDER_TABLE_BANDS", "0.7,0.4")
+    with pytest.raises(ValueError, match="DECIDER_TABLE_BANDS"):
+        Settings(_env_file=None)
 
 
 def test_visibility_timeout_outlasts_every_task_on_the_shared_redis_db(monkeypatch):

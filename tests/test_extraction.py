@@ -1,3 +1,5 @@
+import base64
+import io
 import json
 
 import pymupdf
@@ -6,9 +8,11 @@ import requests
 from PIL import Image
 
 from conftest import BODY, book
-from evilflowers_text.extraction import paragraphs, table_review, tables
+from evilflowers_text.extraction import decider, paragraphs, table_review, tables
 from evilflowers_text.extraction.table_review import Review, TableReviewer
+from evilflowers_worker import contract
 from evilflowers_worker.contract import Box, LayoutRegion
+from evilflowers_worker.judges import Budget, DeciderClient, Panel, Thresholds, Verdict
 
 
 def test_sentences_respect_abbreviations():
@@ -243,3 +247,178 @@ def test_table_region_carries_its_quality_signals(tmp_path, ruled_table_pdf):
     )
     assert rewritten.provenance["review_outcome"] == "rewritten"
     assert rewritten.provenance["grounded_share"] < 1.0
+
+
+# -- The decider: "is this a data table?" (issue #20) ------------------------------------------------------------
+
+DECISION_FIELDS = {"band", "p", "score", "decision", "decider_model", "review_outcome", "grounded_share", "signals"}
+TABLE_BOX = Box(x0=0.15, y0=0.22, x1=0.8, y1=0.4)
+
+
+class FakeDecider:
+    def __init__(self, verdict):
+        self.verdict = verdict
+        self.calls = 0
+
+    def is_table(self, image):
+        self.calls += 1
+        return self.verdict
+
+
+class CountingReviewer(FakeReviewer):
+    def __init__(self, review):
+        super().__init__(review)
+        self.calls = 0
+
+    def review(self, image, draft):
+        self.calls += 1
+        return super().review(image, draft)
+
+
+def read_one(tmp_path, pdf, **kwargs):
+    [region] = tables.TableReader(tmp_path, dpi=72, quality=50, **kwargs).read(
+        pdf, "runs/1", [LayoutRegion(page=1, seq=3, bbox=TABLE_BOX)]
+    )
+    return contract.dump(region)
+
+
+def verdict(answer, p, band=None, model="strands"):
+    return Verdict(question="is_table", verdict=answer, p=p, model=model, revision="216d1ccb", band=band)
+
+
+class FakeHttp:
+    """The kit client's `requests.Session`: records the call, answers `body` (or raises `error`)."""
+
+    def __init__(self, body=None, error=None):
+        self.body, self.error, self.sent = body, error, {}
+
+    def post(self, url, **kwargs):
+        self.sent.update(url=url, **kwargs)
+        if self.error:
+            raise self.error
+        response = requests.Response()
+        response.status_code = 200
+        response._content = json.dumps(self.body).encode()
+        return response
+
+
+def table_decider(http, thresholds=None):
+    client = DeciderClient("decider-vision", "http://dv/v1/systemone", vision=True, timeout=7, http=http)
+    return decider.TableDecider(client, Panel(Budget(10, 0), thresholds or {}))
+
+
+def test_decider_asks_the_kits_judge_with_the_crop_and_the_noul_question():
+    http = FakeHttp({"answers": {"is_table": {"noul": 0.9}}, "model": "strands"})
+    answer = table_decider(http).is_table(Image.new("RGB", (2000, 1000), "white"))
+    assert answer.verdict == "yes" and answer.p == pytest.approx(0.9) and answer.band is None
+    assert http.sent["url"] == "http://dv/v1/systemone" and http.sent["timeout"] == 7
+    question = http.sent["json"]["questions"]["is_table"]
+    assert question["type"] == "noul" and "table of contents" in question["instructions"]
+    [image] = http.sent["json"]["images"]
+    crop = Image.open(io.BytesIO(base64.b64decode(image)))
+    assert crop.format == "WEBP" and max(crop.size) == decider.MAX_SIDE
+
+
+def test_the_kits_thresholds_band_a_non_table_hide():
+    http = FakeHttp({"answers": {"is_table": {"noul": 0.05}}, "model": "strands"})
+    answer = table_decider(http, {"is_table": Thresholds(keep=0.8, hide=0.9)}).is_table(Image.new("RGB", (8, 8)))
+    assert answer.verdict == "no" and answer.p == pytest.approx(0.95) and answer.band == "hide"
+    assert decider.p_table(answer) == pytest.approx(0.05)
+
+
+@pytest.mark.parametrize(
+    "http",
+    [
+        FakeHttp(error=requests.ConnectionError("down")),
+        # Never read an odd answer as p = 0: it is no answer.
+        FakeHttp({"answers": {"is_table": {"choice": "maybe"}}}),
+        FakeHttp({"detail": "Not found"}),
+    ],
+)
+def test_no_answer_is_no_verdict_never_an_error(http):
+    assert table_decider(http).is_table(Image.new("RGB", (8, 8))) is None
+
+
+def test_without_a_verdict_the_payload_is_the_one_before_the_decider(tmp_path, ruled_table_pdf):
+    for kwargs in ({}, {"decider": FakeDecider(None)}):
+        payload = read_one(tmp_path, ruled_table_pdf, **kwargs)
+        assert not DECISION_FIELDS & payload.keys()
+        assert payload["provenance"]["grounded_share"] == 1.0
+
+
+def test_a_data_table_is_reviewed_scored_and_banded(tmp_path, ruled_table_pdf):
+    reviewer = CountingReviewer(Review(None, "kept"))
+    payload = read_one(
+        tmp_path,
+        ruled_table_pdf,
+        reviewer=reviewer,
+        decider=FakeDecider(verdict("yes", 0.9, band="keep")),
+        decision=tables.Decision(bands=(0.4, 0.7)),
+    )
+    assert reviewer.calls == 1
+    assert payload["band"] == "keep" and payload["p"] == 0.9 and payload["decision"] == "yes"
+    assert payload["decider_model"] == "strands@216d1ccb"
+    # Grounded 1.0 (×3), grid 1.0 (×2), kept 1.0 (×1), p 0.9 (×1).
+    assert payload["score"] == pytest.approx((3 + 2 + 1 + 0.9) / 7, abs=0.001)
+    assert payload["review_outcome"] == "kept" and payload["grounded_share"] == 1.0
+    assert payload["signals"] == {
+        "filled_share": 1.0,
+        "fragment_share": 0.0,
+        "strategy": "lines",
+        "rotated_share": 0.0,
+    }
+    # The #19 provenance stays as it was.
+    assert payload["provenance"]["review_outcome"] == "kept" and payload["provenance"]["grid_strategy"] == "lines"
+
+
+def test_not_a_data_table_skips_the_review_and_is_hidden(tmp_path, ruled_table_pdf):
+    reviewer = CountingReviewer(Review(None, "kept"))
+    payload = read_one(
+        tmp_path,
+        ruled_table_pdf,
+        reviewer=reviewer,
+        decider=FakeDecider(verdict("no", 0.95, band="hide")),
+        decision=tables.Decision(bands=(0.4, 0.7)),
+    )
+    assert reviewer.calls == 0
+    assert payload["band"] == "hide" and payload["p"] == 0.95 and payload["decision"] == "no"
+    # A table of contents is perfectly grounded: no score, so the catalog cannot re-band it upward.
+    assert "score" not in payload and "review_outcome" not in payload
+    # The crop and the draft are kept; the region is still posted.
+    assert payload["image_path"] == "runs/1/p001-tab03.webp" and payload["markdown"].startswith("| R0C0")
+
+
+def test_without_thresholds_the_region_has_p_and_score_but_no_band(tmp_path, ruled_table_pdf):
+    reviewer = CountingReviewer(Review(None, "kept"))
+    # A confident "no" with no `is_table` thresholds: not banded by the kit, so not skipped.
+    payload = read_one(tmp_path, ruled_table_pdf, reviewer=reviewer, decider=FakeDecider(verdict("no", 1.0)))
+    assert reviewer.calls == 1
+    assert "band" not in payload and payload["p"] == 1.0 and payload["decision"] == "no"
+    # p of "a data table" is 0: grounded 1.0 (×3), grid 1.0 (×2), kept 1.0 (×1), 0 (×1).
+    assert payload["score"] == pytest.approx(6 / 7, abs=0.001)
+
+
+def test_a_kept_or_review_band_of_the_answer_does_not_skip(tmp_path, ruled_table_pdf):
+    reviewer = CountingReviewer(Review(None, "kept"))
+    payload = read_one(tmp_path, ruled_table_pdf, reviewer=reviewer, decider=FakeDecider(verdict("no", 0.6, "review")))
+    assert reviewer.calls == 1 and "band" not in payload and payload["score"] is not None
+
+
+@pytest.mark.parametrize(
+    ("score", "band"), [(None, None), (0.1, "hide"), (0.4, "review"), (0.69, "review"), (0.7, "keep")]
+)
+def test_bands_from_the_score(score, band):
+    assert tables.Decision(bands=(0.4, 0.7)).band(score) == band
+    assert tables.Decision().band(score) is None
+
+
+def test_table_score_leaves_out_what_is_unknown():
+    no_grid = tables.Grid(None)
+    assert tables.table_score(None, no_grid, None, None) is None
+    assert tables.table_score(None, no_grid, None, 0.3) == 0.3
+    # An implausible grid counts as 0; a failed review says nothing about the table.
+    implausible = tables.Grid(None, None, 0.2, 0.6)
+    assert tables.table_score(0.9, implausible, "failed", None) == pytest.approx(3 * 0.9 / 5, abs=0.001)
+    assert tables.table_score(1.0, tables.Grid("|", "lines", 0.8, 0.25), "rewritten", 1.0) == pytest.approx(
+        (3 + 2 * 0.6 + 0.5 + 1) / 7, abs=0.001
+    )

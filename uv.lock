@@ -273,9 +273,9 @@ dev = [
 
 [package.metadata]
 requires-dist = [
-    { name = "evilflowers-worker", git = "https://github.com/EvilFlowersCatalog/evilflowers-worker?rev=8fc9c20f28aaf4b983989c7196d9b976709730db" },
-    { name = "evilflowers-worker", extras = ["otel"], marker = "extra == 'otel'", git = "https://github.com/EvilFlowersCatalog/evilflowers-worker?rev=8fc9c20f28aaf4b983989c7196d9b976709730db" },
-    { name = "evilflowers-worker", extras = ["profiling"], marker = "extra == 'profiling'", git = "https://github.com/EvilFlowersCatalog/evilflowers-worker?rev=8fc9c20f28aaf4b983989c7196d9b976709730db" },
+    { name = "evilflowers-worker", extras = ["judges"], git = "https://github.com/EvilFlowersCatalog/evilflowers-worker?rev=e530f68d2e3d98519008d39b30fee96f28009834" },
+    { name = "evilflowers-worker", extras = ["otel"], marker = "extra == 'otel'", git = "https://github.com/EvilFlowersCatalog/evilflowers-worker?rev=e530f68d2e3d98519008d39b30fee96f28009834" },
+    { name = "evilflowers-worker", extras = ["profiling"], marker = "extra == 'profiling'", git = "https://github.com/EvilFlowersCatalog/evilflowers-worker?rev=e530f68d2e3d98519008d39b30fee96f28009834" },
     { name = "numpy", specifier = ">=2" },
     { name = "pdfplumber", specifier = ">=0.11" },
     { name = "pillow", specifier = ">=11" },
@@ -295,7 +295,7 @@ dev = [
 [[package]]
 name = "evilflowers-worker"
 version = "0.1.0"
-source = { git = "https://github.com/EvilFlowersCatalog/evilflowers-worker?rev=8fc9c20f28aaf4b983989c7196d9b976709730db#8fc9c20f28aaf4b983989c7196d9b976709730db" }
+source = { git = "https://github.com/EvilFlowersCatalog/evilflowers-worker?rev=e530f68d2e3d98519008d39b30fee96f28009834#e530f68d2e3d98519008d39b30fee96f28009834" }
 dependencies = [
     { name = "celery", extra = ["redis"] },
     { name = "opentelemetry-api" },

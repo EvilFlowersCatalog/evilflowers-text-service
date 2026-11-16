@@ -1,0 +1,54 @@
+@startuml sequence-table-decision
+!include elvira.iuml
+' =============================================================================
+' What: before the Ollama review, decider-vision says (through the kit's judges) whether a table crop is a data table; a non-table skips the review and is hidden, a table gets a table score and a band.
+' Kind: UML sequence diagram. Scope: one table region inside one tables job of text-tables; the run lifecycle (LeafJob.run) is left out.
+' Source: evilflowers-text-service src/evilflowers_text/extraction/tables.py, decider.py, jobs.py, settings.py; evilflowers-worker judges (#6, a4da32d); Decision-Models, Deploy-Decision-Models notes; issue #20 (2026-11-16)
+' =============================================================================
+
+title Table decision: text-tables, one table region (issue #20; live once decider-vision and the worker are deployed, 2026-11-16)
+
+participant "TableReader\n(text-tables)" as reader <<focus>>
+participant "pdfplumber" as plumber
+participant "Panel\n(kit judges, per job)" as panel
+participant "DeciderClient\n(kit judges)" as client
+participant "decider-vision\n(shared)" as dv
+participant "TableReviewer" as reviewer
+participant "ollama\n(shared)" as ollama
+participant "catalog\n/extraction/v1" as catalog
+
+reader -> plumber : read_table(area)
+plumber --> reader : Grid(markdown, signals)
+alt DECIDER_ENABLED and DECIDER_VISION_URL
+  reader -> panel : ask(decider-vision, IS_TABLE,\nWebP crop ≤ 448 px)
+  alt budget left and breaker closed
+    panel -> client : ask(question, images)
+    client -> dv : HTTP POST /v1/systemone\n(noul is_table)
+    alt answered
+      dv --> client : answers.is_table, model
+      client --> panel : Verdict(yes | no, p, model@revision)
+      panel --> reader : Verdict, banded by JUDGE_THRESHOLDS.is_table
+    else timeout, 429/5xx, refused, unknown shape
+      panel --> reader : None (text_judge_total{outcome})
+    end
+  else budget spent or breaker open
+    panel --> reader : None
+  end
+end
+alt verdict band hide
+  reader -[$accent_msg()]> reader : <b>skip the review</b>, band hide, no score
+else otherwise
+  reader -> reviewer : review(crop, draft)
+  reviewer -> ollama : HTTP POST OLLAMA_ENDPOINT (chat)
+  ollama --> reviewer : JSON
+  reviewer --> reader : Review(markdown, outcome)
+  reader -> reader : grounded_share(markdown, PDF text)
+  opt verdict
+    reader -[$accent_msg()]> reader : <b>table_score</b>(grounded ×3, grid ×2,\noutcome ×1, p(table) ×1); band from DECIDER_TABLE_BANDS
+  end
+end
+reader -> catalog : HTTP POST /runs/{id}/regions\n(+ band, p, decision, decider_model, score, signals when there is a verdict)
+
+caption No verdict: the region is posted as before #20, with no band. Thresholds stay empty until knowledge#65 calibrates them.
+footer ELVIRA · FIIT STU · evilflowers-text-service · docs/diagrams/sequence-table-decision.puml
+@enduml

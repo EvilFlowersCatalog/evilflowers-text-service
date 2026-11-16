@@ -6,8 +6,9 @@ readme = "README.md"
 authors = [{ name = "Jakub Dubec", email = "jakub.dubec@stuba.sk" }]
 requires-python = ">=3.12,<3.13"
 dependencies = [
-    # The shared runtime (#16): job protocol, catalog client, contract, delivery cap, shutdown, telemetry.
-    "evilflowers-worker",
+    # The shared runtime (#16): job protocol, catalog client, contract, delivery cap, shutdown, telemetry;
+    # `judges` (#20): decider-vision asks "is this a data table?".
+    "evilflowers-worker[judges]",
     "numpy>=2",
     "pdfplumber>=0.11",
     "pillow>=11",
@@ -22,7 +23,7 @@ profiling = ["evilflowers-worker[profiling]"]
 
 [tool.uv.sources]
 # Pinned to a commit of master; bump it deliberately.
-evilflowers-worker = { git = "https://github.com/EvilFlowersCatalog/evilflowers-worker", rev = "8fc9c20f28aaf4b983989c7196d9b976709730db" }
+evilflowers-worker = { git = "https://github.com/EvilFlowersCatalog/evilflowers-worker", rev = "e530f68d2e3d98519008d39b30fee96f28009834" }
 
 [dependency-groups]
 # `uv sync` installs the core and this group only.

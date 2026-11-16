@@ -72,6 +72,35 @@ A paragraph's `section` is the innermost outline heading in force on its page (#
 The kwarg is authoritative even when it is `[]`. Without it (an older analyzer), the PDF's bookmarks are read. The
 run's `provenance.paragraphs.outline` says which: `analyzer` or `bookmarks`.
 
+## Table decision
+
+With `DECIDER_ENABLED` and `DECIDER_VISION_URL` set, each table crop goes to `decider-vision` first, through the
+kit's judges (evilflowers-worker#6, the `judges` extra). The question is `decider.IS_TABLE`, a yes/no (`noul`) asking
+"is this a data table, not a table of contents, a form or page layout?", rejected on `no`. The kit owns the HTTP
+client, its circuit breaker (`JUDGE_BREAKER_*`), the per-job budget (`JUDGE_BUDGET_*`), the band of the answer
+(`JUDGE_THRESHOLDS`) and `text_judge_total{question="is_table", outcome, band}`. Sequence:
+`docs/diagrams/sequence-table-decision.puml`.
+
+- The kit bands the answer `hide` (a `no` at or above `JUDGE_THRESHOLDS.is_table.hide`): the Ollama review is skipped
+  and the region is posted with `band: hide`, `p`, `decision` and no `score`. A table of contents is fully grounded in
+  the PDF text, so a score would only band it upward.
+- Otherwise the review runs as before, then the **table score** is the weighted mean of what is known: grounded share
+  ×3, grid quality (filled share × (1 − fragment share), 0 for an implausible grid) ×2, review outcome ×1 (`kept` 1,
+  `rewritten` and `transcribed` 0.5, `unusable` and `failed` left out), and ×1 the probability that it is a data
+  table. With `DECIDER_TABLE_BANDS=hide_below,keep_from` the band is `hide`, `review` or `keep`. Without it no band is
+  sent, and the catalog bands from `score` once its own thresholds are set.
+- The region carries the kit's `band`, `p` (of the answer given), `decision` (`yes` / `no`) and `decider_model`
+  (`model@revision`, with `DECIDER_VISION_REVISION`), plus `score`, `review_outcome`, `grounded_share` and `signals`
+  (`filled_share`, `fragment_share`, `strategy`, `rotated_share`), the fields of EvilFlowersCatalog#189. The issue-#19
+  keys stay in `provenance`. The crop is kept in every band.
+- Set `JUDGE_THRESHOLDS` for `is_table` before any score bands (here or the catalog's). The decider is 1/7 of the
+  score, so a well-grounded table of contents scores about 0.86 even when it is surely not a table. Only the skip gate
+  hides non-tables.
+- No answer (judges off, decider-vision unreachable or its breaker open, the job's budget spent, an answer of an
+  unknown shape): none of these fields is sent, and the region is posted exactly as before #20. The kit logs
+  `Judge decider-vision unreachable` (or `refused` / `invalid`) and counts the outcome.
+- `text_table_decision_total{band}` counts the bands of answered tables: `keep`, `review`, `hide`, `none`.
+
 ## Embeddings
 
 `embeddings.TeiEncoder` follows the client contract of the knowledge base (`Proposals/Search-Embeddings`,
@@ -142,6 +171,9 @@ defaults and meaning. The ones a deployment sets:
   `TEI_HOST=embed.elvira.internal`.
 - `TEI_LANE=bulk`, and `TEI_CONCURRENCY` (3–4 on dev). It bounds the requests in flight per worker process, so the
   bulk lane (1–3 `tei-embed-bulk` replicas by HPA) sees up to worker replicas × `TEI_CONCURRENCY`.
+- `DECIDER_ENABLED`, `DECIDER_VISION_URL` (`http://decider-vision.shared.svc.cluster.local`) and `DECIDER_TIMEOUT`
+  on `text-tables` (#20), and `DECIDER_VISION_REVISION` (the weights' snapshot). `JUDGE_THRESHOLDS` (`is_table`) and
+  `DECIDER_TABLE_BANDS` stay empty until knowledge#65 calibrates them. See [Table decision](#table-decision).
 - `IMAGE_TAG`, built in by CI
 
 The model is whatever `tei-embed` serves. A new model or revision is a new pipeline version in the catalog: run

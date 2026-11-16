@@ -8,6 +8,14 @@ Each region also carries what is known about the quality of its markdown
 (issue #19), in its ``provenance``: the grid signals of the read, the
 review's outcome and the share of the markdown's values found in the PDF text
 inside the box (``grounded_share``; values not found are likely invented).
+
+With the judges on (issue #20), decider-vision first answers "is this a data table?" from the crop
+(``decider.IS_TABLE``, through the kit's judges). An answer the kit bands ``hide`` (``JUDGE_THRESHOLDS``) skips the
+Ollama review and hides the region; otherwise the region gets a **table score** (``table_score``) from the grounded
+share, the grid, the review outcome and the decider's p, and a band from it once ``DECIDER_TABLE_BANDS`` is calibrated
+(knowledge#65). The decision fields go on the region itself (the kit's ``Region``, evilflowers-worker#7;
+EvilFlowersCatalog#189); with no answer the region is posted exactly as before (``contract.dump`` leaves out the
+``None`` fields).
 """
 
 import logging
@@ -16,15 +24,17 @@ import unicodedata
 from collections.abc import Sequence
 from dataclasses import dataclass
 from pathlib import Path
-from typing import Any
+from typing import Any, Literal
 
 import pdfplumber
 import pymupdf
 
 from evilflowers_text import metrics
 from evilflowers_text.extraction import geometry
-from evilflowers_text.extraction.table_review import TableReviewer
+from evilflowers_text.extraction.decider import TableDecider, p_table
+from evilflowers_text.extraction.table_review import Outcome, TableReviewer
 from evilflowers_worker.contract import Box, LayoutRegion, Region
+from evilflowers_worker.judges import Verdict
 
 logger = logging.getLogger(__name__)
 
@@ -43,6 +53,31 @@ STRATEGIES: tuple[tuple[str, dict], ...] = (
 TOKEN = re.compile(r"\d+(?:[.,]\d+)*|[^\W\d_]+")
 
 Rows = list[list[str | None]]
+Band = Literal["keep", "review", "hide"]
+
+#: Weights of the table score's inputs: the deterministic signals weigh most, the decider's p is one more input.
+SCORE_WEIGHTS = {"grounded": 3.0, "grid": 2.0, "review": 1.0, "decider": 1.0}
+#: What a review outcome says about the markdown. ``unusable`` and ``failed`` say nothing about it: left out.
+REVIEW_SCORES: dict[str, float] = {"kept": 1.0, "rewritten": 0.5, "transcribed": 0.5}
+
+
+@dataclass(frozen=True)
+class Decision:
+    """How the table score becomes a band (issue #20). Unset thresholds: no band from here.
+
+    ``bands``: ``(hide_below, keep_from)`` on the table score; between them the band is ``review``. The "not a data
+    table" gate is the kit's band of the ``is_table`` answer (``JUDGE_THRESHOLDS``), not this.
+    """
+
+    bands: tuple[float, float] | None = None
+
+    def band(self, score: float | None) -> Band | None:
+        if score is None or self.bands is None:
+            return None
+        hide_below, keep_from = self.bands
+        if score >= keep_from:
+            return "keep"
+        return "hide" if score < hide_below else "review"
 
 
 @dataclass(frozen=True)
@@ -64,6 +99,23 @@ class Grid:
             "grid_fragment_share": self.fragment_share,
             "rotated_share": round(self.rotated_share, 3),
         }
+
+    def decision_signals(self) -> dict[str, Any]:
+        """The grid signals under the names of the catalog's ``decision_signals`` (EvilFlowersCatalog#189)."""
+        return {
+            "filled_share": self.filled_share,
+            "fragment_share": self.fragment_share,
+            "strategy": self.strategy,
+            "rotated_share": round(self.rotated_share, 3),
+        }
+
+    def quality(self) -> float | None:
+        """0–1 from the grid: filled and not fragmented. 0 for an implausible grid; None when no grid was found."""
+        if self.filled_share is None:
+            return None
+        if self.strategy is None:
+            return 0.0
+        return self.filled_share * (1.0 - (self.fragment_share or 0.0))
 
 
 def markdown(rows: Rows) -> str | None:
@@ -159,14 +211,44 @@ def grounded_share(table: str | None, text: str) -> float | None:
     return round(hits / len(wanted), 3)
 
 
+def table_score(grounded: float | None, grid: Grid, outcome: Outcome | None, p: float | None) -> float | None:
+    """The weighted mean of the inputs that are known (``SCORE_WEIGHTS``), None when none is.
+
+    Grounding weighs most (no invented values), the grid next; the review outcome and the decider's p are one input
+    each. A missing input (no text layer, review off or failed, rotated text) is left out, not counted as 0.
+    """
+    inputs = {
+        "grounded": grounded,
+        "grid": grid.quality(),
+        "review": REVIEW_SCORES.get(outcome) if outcome else None,
+        "decider": p,
+    }
+    known = {name: value for name, value in inputs.items() if value is not None}
+    if not known:
+        return None
+    weight = sum(SCORE_WEIGHTS[name] for name in known)
+    return round(sum(SCORE_WEIGHTS[name] * value for name, value in known.items()) / weight, 3)
+
+
 class TableReader:
     """Reads the analyzer's table regions of one PDF into catalog regions with a WebP crop each."""
 
-    def __init__(self, storage_path: Path, *, dpi: int, quality: int, reviewer: TableReviewer | None = None):
+    def __init__(
+        self,
+        storage_path: Path,
+        *,
+        dpi: int,
+        quality: int,
+        reviewer: TableReviewer | None = None,
+        decider: TableDecider | None = None,
+        decision: Decision | None = None,
+    ):
         self.storage_path = storage_path
         self.dpi = dpi
         self.quality = quality
         self.reviewer = reviewer
+        self.decider = decider
+        self.decision = decision or Decision()
 
     def versions(self) -> dict[str, str]:
         """The libraries behind the markdown and the crops, for the run's provenance."""
@@ -193,8 +275,11 @@ class TableReader:
         geometry.save(image, self.storage_path / name, self.quality)
         area = table_area(plumber.pages[region.page - 1], region.bbox)
         grid = read_table(area)
+        verdict = self.decider.is_table(image) if self.decider else None
+        # The kit bands the answer only with calibrated thresholds for `is_table`: until then nothing is skipped.
+        skipped = verdict is not None and verdict.band == "hide"
         text, outcome = grid.markdown, None
-        if self.reviewer:
+        if self.reviewer and not skipped:
             review = self.reviewer.review(image, text)
             text, outcome = review.markdown, review.outcome
             metrics.TABLE_REVIEWS.add(1, {"outcome": outcome})
@@ -206,13 +291,14 @@ class TableReader:
             "Table read on page %s (seq %s): review %s, grounded share %s, grid %s",
             region.page,
             region.seq,
-            outcome or "off",
+            "skipped" if skipped else outcome or "off",
             grounded,
             grid.strategy,
         )
         provenance = {**grid.signals(), "grounded_share": grounded}
         if outcome:
             provenance["review_outcome"] = outcome
+        decided = self._decide(verdict, skipped, grid, grounded, outcome)
         return Region(
             kind="table",
             page=region.page,
@@ -223,4 +309,31 @@ class TableReader:
             printed_caption=region.caption,
             markdown=text,
             provenance=provenance,
+            **decided,
         )
+
+    def _decide(
+        self, verdict: Verdict | None, skipped: bool, grid: Grid, grounded: float | None, outcome: Outcome | None
+    ) -> dict[str, Any]:
+        """The decision fields of the region; none at all without a verdict (no answer): no band, as before.
+
+        ``p`` and ``decision`` are the kit's: the probability of the answer given (``yes`` / ``no``), as the catalog
+        stores them. The score takes the probability of "a data table" (``p_table``).
+
+        A skipped region (not a data table) has no score: its PDF text grounds a table of contents perfectly, so a
+        score would only let the catalog re-band it upward. The catalog re-bands it from ``p`` + ``decision`` instead.
+        """
+        if verdict is None:
+            # Why there was none is counted by the kit (`text_judge_total{question="is_table", outcome}`).
+            return {}
+        score = None if skipped else table_score(grounded, grid, outcome, p_table(verdict))
+        band: Band | None = "hide" if skipped else self.decision.band(score)
+        metrics.TABLE_DECISIONS.add(1, {"band": band or "none"})
+        return {
+            **verdict.region_fields(),
+            "band": band,
+            "score": score,
+            "review_outcome": outcome,
+            "grounded_share": grounded,
+            "signals": grid.decision_signals(),
+        }
