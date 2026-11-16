@@ -24,6 +24,8 @@ PARAGRAPHS = Instrument(
 TABLES = Instrument(
     "counter", "{service}.tables.regions", "{table}", "Table regions read, by whether markdown could be read"
 )
+#: ``outcome``: kept, rewritten, transcribed, unusable or failed (issue #19); ``text_table_review_total`` in Mimir.
+TABLE_REVIEWS = Instrument("counter", "{service}.table.review", "{table}", "Table reviews by the model, by outcome")
 
 
 def record_embedding(kind: str, model: str, inputs: int, seconds: float, lane: str | None = None) -> None:

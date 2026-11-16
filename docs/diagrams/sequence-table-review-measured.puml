@@ -1,0 +1,43 @@
+@startuml sequence-table-review-measured
+!include elvira.iuml
+' =============================================================================
+' What: every table region now says what the Ollama review did (outcome) and how much of its markdown is found in the PDF text inside its box (grounded share), so the review can be measured.
+' Kind: UML sequence diagram. Scope: one table region inside one tables job of text-tables; the run lifecycle (LeafJob.run) is left out.
+' Source: evilflowers-text-service src/evilflowers_text/extraction/tables.py, table_review.py, metrics.py; Text-Service, Decision-Models notes; issue #19 (2026-11-16)
+' =============================================================================
+
+title Table review, measured: text-tables, one table region (live once deployed, 2026-11-16)
+
+participant "TablesJob\n(text-tables)" as job
+participant "TableReader" as reader <<focus>>
+participant "pdfplumber" as plumber
+participant "TableReviewer" as reviewer
+participant "ollama\n(shared)" as ollama
+participant "OTel metrics\n(Mimir)" as mimir
+participant "catalog\n/extraction/v1" as catalog
+
+job -> reader : read(path, output_dir, regions)
+reader -> plumber : table_area(page, bbox)
+reader -> plumber : read_table(area)
+plumber --> reader : Grid(markdown, strategy,\nfilled_share, fragment_share, rotated_share)
+alt table review enabled
+  reader -> reviewer : review(crop, draft)
+  reviewer -> ollama : HTTP POST OLLAMA_ENDPOINT (chat, format json)
+  alt answer parsed
+    ollama --> reviewer : JSON
+    reviewer --> reader : Review(markdown, kept | rewritten | transcribed | unusable)
+  else HTTP error, timeout, body not JSON
+    reviewer --> reader : Review(draft, failed)\nlog "Table review failed"
+  end
+  reader -> mimir : text_table_review_total{outcome} +1
+end
+reader -> plumber : area.extract_text()
+reader -[$accent_msg()]> reader : <b>grounded_share(markdown, text)</b>\nnumbers whole, words across line breaks;\nnull for rotated text or no text layer
+reader -> mimir : text_tables_regions_total{markdown} +1
+reader -> reader : log "Table read" (run_id bound by the job)
+reader --> job : Region(markdown, provenance =\n{review_outcome, grounded_share, grid_*})
+job -> catalog : HTTP POST /runs/{id}/regions\n(per-region provenance)
+
+caption Outcome and grounded share travel in each region's provenance today; EvilFlowersCatalog#189 promotes them to columns.
+footer ELVIRA · FIIT STU · evilflowers-text-service · docs/diagrams/sequence-table-review-measured.puml
+@enduml

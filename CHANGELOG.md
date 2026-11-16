@@ -5,6 +5,19 @@ All notable changes to this project are documented here. The format follows
 
 ## [Unreleased]
 
+### Added
+
+- The table review is measured. `TableReviewer.review` returns what it did: `kept`, `rewritten`, `transcribed`,
+  `unusable` or `failed`. The new counter `text_table_review_total{outcome}` counts each outcome, and a
+  `Table read` log line per table gives its page, outcome, grounded share and grid strategy, with the job's `run_id`.
+  Each table region's `provenance` now carries `review_outcome`, `grounded_share`, `grid_strategy`
+  (`lines` | `text` | null), `grid_filled_share`, `grid_fragment_share` and `rotated_share`. `grounded_share` is the
+  share of the markdown's numbers and words found in the PDF text inside the table's box. It is null when there is no
+  markdown, no text layer or rotated text. Words match loosely, across line breaks, so the share moves mainly with the
+  numbers. The catalog stores the per-region provenance as it is today, and
+  [EvilFlowersCatalog#189](https://github.com/EvilFlowersCatalog/EvilFlowersCatalog/issues/189) will promote these
+  fields to columns. ([#19](https://github.com/EvilFlowersCatalog/evilflowers-text-service/issues/19))
+
 ### Changed
 
 - The runtime is now the shared [evilflowers-worker](https://github.com/EvilFlowersCatalog/evilflowers-worker) kit,
