@@ -148,8 +148,8 @@ jobs:
     permissions: {}
     env:
       NAMESPACE: evilflowers-dev
-      # Space-separated; only `text` runs this image (`text-embed` was removed with embed_query).
-      DEPLOYMENTS: text
+      # Space-separated; every Deployment that runs this image (`text` split into these two, #48).
+      DEPLOYMENTS: text-tables text-paragraphs
       DIGEST: ${{ needs.build-and-push.outputs.digest }}
       KUBECTL_VERSION: v1.31.5     # = the cluster (k3s v1.31.5+k3s1)
       KUBECTL_SHA256: fbecbfd375b3686002c2e81d51c390172f5ffba3d6b47920d55342cb03f557af   # dl.k8s.io …/linux/amd64/kubectl.sha256
@@ -207,7 +207,7 @@ jobs:
             echo
             echo '```'
             kubectl -n "$NAMESPACE" get pods -o wide \
-              -l 'app.kubernetes.io/name=text' 2>&1 || true
+              -l 'app.kubernetes.io/name in (text-tables,text-paragraphs)' 2>&1 || true
             echo '```'
             echo
             echo "Grafana (VPN): http://grafana.observability.stu.k8s.internal → Explore"
